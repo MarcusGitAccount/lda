@@ -145,3 +145,32 @@ def test_no_overlap_in_result():
     out = resolve_overlaps(spans, text)
     for a, b in zip(out, out[1:]):
         assert a.end <= b.start
+
+
+def test_the_rest_of_a_cut_name_that_is_only_function_words_is_dropped():
+    # The KEEP spans cut three names out of one long name. "of" and "and" must not stay as names:
+    # the vault would learn them, and the sweep would then hide every "and" in every document.
+    text = "against the United Kingdom of Great Britain and Northern Ireland lodged"
+    whole = text.index("United")
+    spans = [
+        Span(whole, text.index(" lodged"), "ORGANIZATION", 0.9, "vault"),
+        Span(whole, whole + len("United Kingdom"), "KEEP", 1.0, "presidio"),
+        Span(text.index("Great"), text.index("Great") + len("Great Britain"), "KEEP", 1.0, "presidio"),
+        Span(text.index("Northern"), text.index("Northern") + len("Northern Ireland"), "KEEP", 1.0, "presidio"),
+    ]
+    assert resolve_overlaps(spans, text) == []
+
+
+def test_the_rest_of_a_cut_name_with_a_real_word_stays():
+    # A known person cuts two parts out of a company name. "Construct" is left, and it is still hidden.
+    text = "Alfa Construct Beta"
+    spans = [
+        Span(0, len(text), "ORGANIZATION", 0.9, "presidio"),
+        Span(0, 4, "PERSON", 1.0, "vault"),
+        Span(15, 19, "PERSON", 1.0, "vault"),
+    ]
+    assert [(text[s.start : s.end], s.type) for s in resolve_overlaps(spans, text)] == [
+        ("Alfa", "PERSON"),
+        ("Construct", "ORGANIZATION"),
+        ("Beta", "PERSON"),
+    ]

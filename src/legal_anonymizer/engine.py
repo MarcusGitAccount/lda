@@ -29,6 +29,8 @@ class AnonymizeResult:
     counts: Counter = field(default_factory=Counter)
     # Words that the document still has after the change. Should be empty.
     leaks: list[str] = field(default_factory=list)
+    # The spans that were hidden, as offsets in the text of the units joined with "\n". For the evaluation.
+    spans: list[Span] = field(default_factory=list)
 
 
 @dataclass
@@ -125,7 +127,7 @@ class Engine:
             output = item.document.rewrite(replacements, scrub=True)
             self.vault.record_document(item.name, hashlib.sha256(item.data).hexdigest(), item.language, dict(mentions))
 
-        return AnonymizeResult(output, item.language, counts, self.find_leaks(item.name, output))
+        return AnonymizeResult(output, item.language, counts, self.find_leaks(item.name, output), spans)
 
     def _known_forms(self) -> tuple[re.Pattern | None, dict[str, tuple[str, int]]]:
         """Return one regex for all known written forms, and the owner of each form."""

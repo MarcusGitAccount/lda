@@ -1,0 +1,88 @@
+{
+  "when": "2026-11-01T20:46:54+00:00",
+  "dataset": "corpus-tab-en",
+  "name": "bert+gliner-t0.5",
+  "settings": {
+    "level": "medium",
+    "min_score": 0.4,
+    "keep_public_bodies": true,
+    "ro_model": "dumitrescustefan/bert-base-romanian-ner",
+    "en_model": "dslim/bert-large-NER",
+    "gliner_model": "urchade/gliner_multi_pii-v1",
+    "gliner_threshold": 0.5,
+    "llm_model": null
+  },
+  "seconds": 129.7,
+  "metrics": {
+    "documents": 12,
+    "words": 20463,
+    "gold_entities": 239,
+    "mentions": {
+      "tp": 394,
+      "fp": 182,
+      "fn": 74,
+      "precision": 0.684,
+      "recall": 0.8419,
+      "f1": 0.7548,
+      "f2": 0.8047
+    },
+    "by_gold_type": {
+      "CODE": {
+        "tp": 0,
+        "fp": 0,
+        "fn": 17,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "f2": 0.0
+      },
+      "LOCATION": {
+        "tp": 32,
+        "fp": 0,
+        "fn": 2,
+        "precision": 1.0,
+        "recall": 0.9412,
+        "f1": 0.9697,
+        "f2": 0.9524
+      },
+      "ORGANIZATION": {
+        "tp": 162,
+        "fp": 0,
+        "fn": 47,
+        "precision": 1.0,
+        "recall": 0.7751,
+        "f1": 0.8733,
+        "f2": 0.8116
+      },
+      "PERSON": {
+        "tp": 200,
+        "fp": 0,
+        "fn": 8,
+        "precision": 1.0,
+        "recall": 0.9615,
+        "f1": 0.9804,
+        "f2": 0.969
+      }
+    },
+    "split_entities": 38,
+    "entities_seen": 167,
+    "merged_ids": 8,
+    "leaked_forms": 46,
+    "must_keep_missing": 0,
+    "restore_words_equal": 0.9992,
+    "words_per_second": 157.8
+  },
+  "environment": {
+    "commit": "7b70bcf",
+    "dirty": true,
+    "python": "3.13.5",
+    "machine": "Darwin arm64",
+    "packages": {
+      "presidio-analyzer": "2.2.366",
+      "transformers": "4.57.6",
+      "torch": "2.15.0",
+      "gliner": "0.2.30",
+      "legal-anonymizer": "0.1.0"
+    }
+  }
+}

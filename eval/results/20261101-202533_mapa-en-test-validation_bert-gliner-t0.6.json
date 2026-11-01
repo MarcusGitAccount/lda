@@ -1,0 +1,71 @@
+{
+  "when": "2026-11-01T20:25:33+00:00",
+  "dataset": "mapa-en-test+validation",
+  "name": "bert+gliner-t0.6",
+  "settings": {
+    "level": "medium",
+    "min_score": 0.4,
+    "keep_public_bodies": false,
+    "ro_model": "dumitrescustefan/bert-base-romanian-ner",
+    "en_model": "dslim/bert-large-NER",
+    "gliner_model": "urchade/gliner_multi_pii-v1",
+    "gliner_threshold": 0.6,
+    "llm_model": null
+  },
+  "seconds": 156.0,
+  "metrics": {
+    "documents": 3,
+    "tokens": 25895,
+    "recall_any_type": 0.9213,
+    "classes": {
+      "PERSON": {
+        "gold": 131,
+        "covered": 124,
+        "recall": 0.9466,
+        "right_type_recall": 0.9008
+      },
+      "ORGANISATION": {
+        "gold": 191,
+        "covered": 174,
+        "recall": 0.911,
+        "right_type_recall": 0.8325
+      },
+      "ADDRESS": {
+        "gold": 21,
+        "covered": 18,
+        "recall": 0.8571,
+        "right_type_recall": 0.8095
+      }
+    },
+    "hidden_or_not": {
+      "tp": 316,
+      "fp": 646,
+      "fn": 27,
+      "precision": 0.3285,
+      "recall": 0.9213,
+      "f1": 0.4843,
+      "f2": 0.6769
+    },
+    "predicted_tokens": {
+      "PERSON": 223,
+      "ORGANIZATION": 801,
+      "LOCATION": 75,
+      "URL": 1,
+      "ADDRESS": 0
+    },
+    "tokens_per_second": 166.0
+  },
+  "environment": {
+    "commit": "7b70bcf",
+    "dirty": true,
+    "python": "3.13.5",
+    "machine": "Darwin arm64",
+    "packages": {
+      "presidio-analyzer": "2.2.366",
+      "transformers": "4.57.6",
+      "torch": "2.15.0",
+      "gliner": "0.2.30",
+      "legal-anonymizer": "0.1.0"
+    }
+  }
+}

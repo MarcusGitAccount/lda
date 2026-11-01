@@ -15,12 +15,14 @@ from presidio_analyzer.predefined_recognizers import (
 )
 
 from .config import Settings
+from .gliner_ner import GLINER_NAME, gliner_recognizer
 from .lang import SUPPORTED, detect_language
+from .llm_check import OllamaChecker
 from .ner import EnglishNerRecognizer, RomanianNerRecognizer
 from .patterns import build_pattern_recognizers
 from .spans import NAME_TYPES, Span, keep_set, refine
 
-NER_NAMES = {"RomanianBertNer", "EnglishBertNer"}
+NER_NAMES = {"RomanianBertNer", "EnglishBertNer", GLINER_NAME}
 PHONE_REGIONS = ("RO", "GB", "US", "DE", "FR", "IT", "ES", "HU", "MD", "BG", "NL", "AT", "PL")
 
 
@@ -31,6 +33,8 @@ class Detector:
         self.settings = settings or Settings()
         self._analyzer: AnalyzerEngine | None = None
         self._ner_ready: set[str] = set()
+        self._gliner_model: dict[str, str] = {}  # language -> model name of the GLiNER recognizer
+        self._checkers: dict[tuple[str, str], OllamaChecker] = {}
 
     # Presidio needs an NLP engine. The NER models do their own tokenizing, so we
     # use the "no_op" engine and we do not need spaCy models.
@@ -63,9 +67,12 @@ class Detector:
         return self._analyzer
 
     def warm_up(self, languages: tuple[str, ...] = SUPPORTED) -> None:
-        """Load the models now. The first call downloads them."""
+        """Load the models now. The first call downloads them. Check the LLM too, if the level needs it."""
         for language in languages:
             self._ensure_ner(language)
+            self._ensure_gliner(language, self.settings)
+        if self.settings.use_llm:
+            self.checker(self.settings)
 
     def _ensure_ner(self, language: str) -> None:
         if language in self._ner_ready:
@@ -76,6 +83,22 @@ class Detector:
             recognizer = EnglishNerRecognizer(self.settings.en_model)
         self.analyzer.registry.add_recognizer(recognizer)
         self._ner_ready.add(language)
+
+    def _ensure_gliner(self, language: str, settings: Settings) -> None:
+        if not settings.use_gliner or self._gliner_model.get(language) == settings.gliner_model:
+            return
+        if language in self._gliner_model:  # another model was asked for
+            self.analyzer.registry.remove_recognizer(GLINER_NAME, language)
+        self.analyzer.registry.add_recognizer(gliner_recognizer(language, settings.gliner_model))
+        self._gliner_model[language] = settings.gliner_model
+
+    def checker(self, settings: Settings) -> OllamaChecker:
+        key = (settings.llm_model, settings.llm_host)
+        if key not in self._checkers:
+            checker = OllamaChecker(settings.llm_model, settings.llm_host)
+            checker.check_ready()  # fail now, with a clear message, and not after the first documents
+            self._checkers[key] = checker
+        return self._checkers[key]
 
     def language_of(self, text: str, language: str | None = None) -> str:
         language = language or detect_language(text)
@@ -94,6 +117,7 @@ class Detector:
         settings = settings or self.settings
         keep = keep_set(settings.keep)
         self._ensure_ner(language)
+        self._ensure_gliner(language, settings)
         results = self.analyzer.analyze(
             text=text,
             language=language,
@@ -105,8 +129,12 @@ class Detector:
                 continue
             # The score of a pattern is not on the same scale as the score of a model.
             # So the minimum score is only for the NER models.
-            from_ner = result.recognition_metadata.get(RecognizerResult.RECOGNIZER_NAME_KEY) in NER_NAMES
-            if from_ner and result.score < settings.min_score:
+            recognizer = result.recognition_metadata.get(RecognizerResult.RECOGNIZER_NAME_KEY)
+            if recognizer == GLINER_NAME and not settings.use_gliner:
+                continue  # an earlier call, with other settings, added the recognizer
+            from_ner = recognizer in NER_NAMES
+            floor = settings.gliner_threshold if recognizer == GLINER_NAME else settings.min_score
+            if from_ner and result.score < floor:
                 continue
             if result.entity_type == "PHONE_NUMBER" and not looks_like_phone(text[result.start : result.end]):
                 continue
@@ -119,7 +147,18 @@ class Detector:
                 if from_ner and span.type in NAME_TYPES and is_common_word(text, span, context):
                     continue
                 spans.append(span)
+        if settings.use_llm:
+            spans += self._llm_spans(text, spans, settings, keep, context)
         return merge_initials(text, spans)
+
+    def _llm_spans(self, text: str, spans: list[Span], settings: Settings, keep: set[str], context: str | None) -> list[Span]:
+        """The LLM reads the hidden text. The spans that it adds get the same clean-up as the model spans."""
+        found = []
+        for raw in self.checker(settings).missed(text, spans):
+            span = refine(text, raw, keep, settings.keep_public_bodies)
+            if span is not None and not (span.type in NAME_TYPES and is_common_word(text, span, context)):
+                found.append(span)
+        return found
 
 
 _DATE_LIKE = re.compile(r"\d{1,2}\s?[./-]\s?\d{1,2}\s?[./-]\s?\d{2,4}|\d{4}\s?[./-]\s?\d{1,2}\s?[./-]\s?\d{1,2}")

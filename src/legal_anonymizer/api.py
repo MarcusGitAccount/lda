@@ -96,6 +96,8 @@ def create_app(home: str | Path | None = None, detector: Detector | None = None)
                 raise HTTPException(415, str(error)) from error
             except ValueError as error:
                 raise HTTPException(422, str(error)) from error
+            except RuntimeError as error:  # no Ollama, no GLiNER: the level in the config file cannot run
+                raise HTTPException(503, str(error)) from error
         documents = []
         for (name, _), result in zip(uploads, results):
             kinds = Counter(re.match(r"\[([A-Z_]+?)_\d+\]", p).group(1) for p in result.counts.elements())

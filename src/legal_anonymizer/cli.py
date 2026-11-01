@@ -10,7 +10,7 @@ import sys
 from collections import Counter
 from pathlib import Path
 
-from .config import load_settings
+from .config import LEVELS, Settings, load_settings
 from .documents import UnsupportedFormat
 from .vault import Vault
 
@@ -49,7 +49,8 @@ def read_files(paths: list[str]) -> list[tuple[str, bytes]]:
 def cmd_setup(args) -> int:
     from .detector import Detector
 
-    detector = Detector()
+    settings = Settings(level=args.level)
+    detector = Detector(settings)
     for lang in ("ro", "en"):
         print(f"Loading the {lang} model. The first time, it is downloaded (about 1.3 GB for English) ...")
         detector.warm_up((lang,))
@@ -76,6 +77,9 @@ def cmd_anonymize(args) -> int:
     from .engine import Engine
 
     settings = load_settings(args.config, hide=args.hide.split(",") if args.hide else None)
+    if args.level:
+        settings.level = args.level
+        settings.validate()
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)
     files = read_files(args.files)
@@ -84,7 +88,7 @@ def cmd_anonymize(args) -> int:
         engine.load_seeds()
         try:
             results = engine.anonymize_many(files, language=args.lang)
-        except (UnsupportedFormat, ValueError) as error:
+        except (UnsupportedFormat, ValueError, RuntimeError) as error:  # RuntimeError: no Ollama, no GLiNER
             raise SystemExit(f"Error: {error}") from error
         bad = 0
         for (name, _), result in zip(files, results):
@@ -207,6 +211,7 @@ def build_parser() -> argparse.ArgumentParser:
         p.add_argument("--matter", "-m", required=True, help="name of the case; one vault for each case")
 
     p = sub.add_parser("setup", help="download the models", parents=[home_option])
+    p.add_argument("--level", choices=sorted(LEVELS), default="low", help="medium and high also download GLiNER")
     p.set_defaults(func=cmd_setup)
 
     p = sub.add_parser("text", help="show the text that the tool reads from a file (also from a PDF)", parents=[home_option])
@@ -220,6 +225,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--config", "-c", help="YAML file with known entities, aliases and options")
     p.add_argument("--lang", choices=["ro", "en"], help="language (default: detect for each file)")
     p.add_argument("--hide", help="comma list of entity types to hide, for example PERSON,ORGANIZATION,DATE_TIME")
+    p.add_argument("--level", choices=sorted(LEVELS), help="low = BERT (fast), medium = + GLiNER, high = + local LLM (slow). Default: from the config file, or low")
     p.set_defaults(func=cmd_anonymize)
 
     p = sub.add_parser("restore", help="put the real data back in documents", parents=[home_option])

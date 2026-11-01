@@ -67,7 +67,17 @@ def main() -> None:
         print("wrote", OUT / name)
     (OUT / "matter.yaml").write_text(CONFIG, encoding="utf-8")
     (OUT / "gold.json").write_text(
-        json.dumps({"must_hide": c.MUST_HIDE, "must_keep": c.MUST_KEEP, "visible_ok": c.VISIBLE_OK}, ensure_ascii=False, indent=2), encoding="utf-8"
+        json.dumps(
+            {
+                "documents": [name for name, _ in DOCUMENTS],
+                "must_hide": c.MUST_HIDE,
+                "must_keep": c.MUST_KEEP,
+                "visible_ok": c.VISIBLE_OK,
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
     )
 
 

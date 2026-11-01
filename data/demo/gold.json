@@ -1,4 +1,11 @@
 {
+  "documents": [
+    "01_contract_transport.ro.pdf",
+    "02_notificare_punere_in_intarziere.ro.pdf",
+    "03_cerere_chemare_in_judecata.ro.pdf",
+    "04_contract_asistenta_juridica.ro.pdf",
+    "05_settlement_agreement.en.pdf"
+  ],
   "must_hide": [
     "Mureșul Agro Trans",
     "38291748",

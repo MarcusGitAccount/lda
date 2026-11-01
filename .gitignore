@@ -9,3 +9,8 @@ anonymized/
 demo-output/
 demo-docx/
 restored/
+# Review files of eval.corpus_eval have real text from the documents. Private test documents too.
+_review/
+eval/corpora/private/
+eval/tab_raw/
+eval/corpora/tab-en/

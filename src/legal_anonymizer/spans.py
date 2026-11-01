@@ -177,6 +177,11 @@ _LIST_MARKER = re.compile(r"\d+[.)]\s+")
 _ABBREVIATION = re.compile(r"(?:(?<!\w)[^\W\d_]\.)+[^\W\d_]$")
 NAME_TYPES = {"PERSON", "ORGANIZATION", "LOCATION"}
 _LEADING_PREPOSITIONS = {"de", "din", "la", "pe", "cu", "pentru", "către", "catre", "prin", "of", "for", "to", "the"}
+# Words that are never a name alone. A rest of a cut span can be only such words: the "of" and the "and"
+# in "United Kingdom of Great Britain and Northern Ireland", after the KEEP spans cut the three names out.
+_FUNCTION_WORDS = _LEADING_PREPOSITIONS | {
+    "and", "or", "in", "on", "at", "by", "with", "a", "an", "și", "si", "sau", "ori", "al", "ai", "ale", "lui",
+}  # fmt: skip
 # A heading in capital letters ("DE TRANSPORT RUTIER ...") is not the name of a company.
 _HEADING_START = {"DE", "DIN", "LA", "SI", "ȘI", "CU", "PENTRU", "PRIN", "SAU", "OF", "FOR", "AND", "TO", "ON", "IN"}
 # Words of an address that are not private alone ("nr.", "jud.", "et. 2").
@@ -194,6 +199,11 @@ def _trim_end(text: str, start: int, end: int) -> int:
             break
         end -= 1
     return end
+
+
+def _only_function_words(piece: str) -> bool:
+    words = [w for w in (_word(t) for t in piece.split()) if w]
+    return bool(words) and all(w in _FUNCTION_WORDS for w in words)
 
 
 def _is_scaffold(piece: str) -> bool:
@@ -315,6 +325,8 @@ def _pieces(span: Span, others: list[Span], text: str) -> list[Span]:
             continue
         if span.type == "ADDRESS" and _is_scaffold(text[a:b]):
             continue  # what is left of an address after we cut a name from it: "jud."
+        if span.type in NAME_TYPES and _only_function_words(text[a:b]):
+            continue  # what is left of a name between two parts that we cut out: "of", "and", "și"
         result.append(replace(span, start=a, end=b))
     return result
 

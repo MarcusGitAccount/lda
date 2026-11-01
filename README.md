@@ -36,6 +36,8 @@ The AI tool gets:
    - Romanian text: the model [`dumitrescustefan/bert-base-romanian-ner`](https://huggingface.co/dumitrescustefan/bert-base-romanian-ner).
    - English text: the model [`dslim/bert-large-NER`](https://huggingface.co/dslim/bert-large-NER).
    - Patterns with checksums (CNP, CUI, IBAN), and patterns for e-mail, phone, address, case numbers, and UK company numbers and postcodes.
+   - Level `medium` and `high`: the zero-shot model [GLiNER](https://huggingface.co/urchade/gliner_multi_pii-v1) finds more names (see "Levels").
+   - Level `high`: a small LLM on your computer (through Ollama) reads the hidden text and lists the names that remain (see "Levels").
 3. **Clean.** The tool removes titles and role words (`dl.`, `Reclamanta`, `BENEFICIAR`). They are not private, and the AI tool needs them. It also removes common words that the model marks as names (a word that the batch also writes in lowercase is not a name), list numbers (`2. S.C. Alfa S.R.L.`), and headings in capital letters.
 4. **Sweep.** The tool looks in all documents of the batch for every known entity. It ignores case, accents, and spaces.
 5. **Give ids.** The vault (a local SQLite file for one case) gives each entity an id. A new written form of a known entity gets the old id.
@@ -54,6 +56,14 @@ python3 -m venv .venv
 ```
 
 The `dev` extras also install `reportlab`. Only the tests and the demo builder need it.
+
+For the levels `medium` and `high` (see "Levels"), install GLiNER too, and for `high` install [Ollama](https://ollama.com) and pull a model:
+
+```bash
+.venv/bin/pip install -e ".[gliner]"       # GLiNER. It needs transformers 4.x, not 5.x.
+.venv/bin/lda setup --level medium         # downloads GLiNER too (about 1 GB)
+ollama pull qwen3.5:4b                     # only for level high
+```
 
 After this step, the tool works without a network. Document text never goes to a network at any time: the models run on your computer. To make sure that the tool does not even contact the model hub, set `HF_HUB_OFFLINE=1`.
 
@@ -166,6 +176,20 @@ Other commands:
 
 `--home DIR` (or the variable `LDA_HOME`) sets the folder for the vaults. The default is `~/.legal-anonymizer`.
 
+## Levels
+
+A level says how hard the tool looks for names. A higher level finds more, and is slower.
+
+| Level | What runs | Cost | Status |
+|---|---|---|---|
+| `low` (default) | patterns + the BERT models | the fastest | measured |
+| `medium` | + GLiNER, a second model that adds hits | 2 times slower in English, 4 times in Romanian, about 1 GB more | measured |
+| `high` | + a local LLM that reads the hidden text and lists the names that remain | the slowest (an LLM call for each 1,500 characters) | **code ready, no real LLM measured yet** |
+
+Choose the level with `--level` (`lda anonymize --level medium ...`) or with `level:` in the config file. On the test sets, `medium` raises the recall on English text a lot (see "Tests and results"). On Romanian text the gain is too small to measure, so `low` stays the default until we test on real Romanian documents.
+
+The LLM never edits the document and never removes a hit. It gets the text after hiding (tags in place of the data), and it returns a list of words. The tool accepts a word only if the word is really in that text. The LLM host must be on your computer (`127.0.0.1` or `localhost`). The tool refuses any other host, so the text cannot leave the computer. If a level cannot run (no GLiNER, no Ollama, no model), the tool stops with a clear message. It never goes to a lower level without telling you.
+
 ## The config file
 
 The config file is optional. Use it to tell the tool about known entities, to keep some text visible, and to change what the tool hides. The file has real names. Keep it outside the folder that the AI tool can read.
@@ -175,6 +199,11 @@ hide: [PERSON, ORGANIZATION, LOCATION, ADDRESS, DATE_TIME]  # default: all types
 keep: ["Tribunalul București", "ANAF"]   # never hide these texts
 keep_public_bodies: true                  # do not hide courts, ministries, EU bodies (default: false)
 min_score: 0.4                            # lower value = more recall, more false hits
+level: low                                # low | medium | high (see "Levels")
+gliner_model: urchade/gliner_multi_pii-v1 # medium and high. A GLiNER2 model (name with "gliner2") also works
+gliner_threshold: 0.5                     # minimum GLiNER score
+llm_model: qwen3.5:4b                     # high. The model must be in Ollama
+llm_host: http://127.0.0.1:11434          # high. Only a host on this computer is accepted
 en_model: dslim/bert-base-NER             # a smaller English model is 4 times faster
 entities:                                 # known entities, hidden in every document
   - type: PERSON
@@ -216,28 +245,54 @@ The API returns JSON. Each document has `content_base64`, and text files also ha
 .venv/bin/python -m pytest -m "not models" # fast tests, no models, under 1 second
 ```
 
-There are 137 tests (108 of them run without the models, in about 10 seconds). They cover the patterns and checksums, the vault, the Word and PDF file handling, the restore step with changed ids, the multi-document rules, the CLI, the API, the simulated AI edits with tracked changes, and three full runs with the real models: on the sample case, on the five demo PDFs, and on the five demo Word files. In the first run, none of 32 listed secrets stays in any output. In the other two runs, none of 57 listed secrets stays in the five files, the client has the same id in all five documents, and no common word is hidden as a name. For the Word files the tests also check that the layout, the styles, and the table rows stay, and that the author name is gone from the file properties, the headers, and the footers.
+There are 181 tests (149 of them run without the models). They cover the patterns and checksums, the vault, the Word and PDF file handling, the restore step with changed ids, the multi-document rules, the CLI, the API, the simulated AI edits with tracked changes, the GLiNER recognizer, the LLM checker (against a fake Ollama server, so no LLM is needed), the evaluation tools, and full runs with the real models: on the sample case, on the five demo PDFs, and on the five demo Word files. In the first run, none of 32 listed secrets stays in any output. In the other two runs, none of 57 listed secrets stays in the five files, the client has the same id in all five documents, and no common word is hidden as a name. For the Word files the tests also check that the layout, the styles, and the table rows stay, and that the author name is gone from the file properties, the headers, and the footers.
 
 The first run on the demo PDFs found problems that the short sample texts did not show: the model marked common words as names (`personal`, `poștal`, `jud`), date ranges were read as phone numbers, e-mail addresses with an unknown domain ending were not found, and the word sweep then spread each of these errors through all documents. The tests now guard against them. The Word demo found one more: in a running header such as `Alfa S.R.L. / Beta S.A.`, the model put the `/` into the first name, and restore lost the slash. The clean-up now removes separators (`/`, `|`, dashes) at the edge of a name.
 
-**Detection quality.** The script `eval/mapa_eval.py` measures the detector on [MAPA](https://huggingface.co/datasets/joelniklaus/mapa), a set of EU legal texts with anonymization labels (CC-BY-4.0). It counts tokens. A token of a person, an organization, or an address counts as found if any span covers it, with any type. Tokens that the policy keeps on purpose (titles, role words, country names) do not count.
+**Detection quality.** Two scripts measure it, and every run writes a result file (settings, package versions, time, metrics) to `eval/results/`. The notes about what we tried and decided are in [`docs/experiments.md`](docs/experiments.md). The table of all runs is in [`docs/results.md`](docs/results.md). We write recall, precision, F1, and F2. Recall decides: a missed name is a leak, and a false hit only makes the text harder to read. F2 counts recall twice as much as precision.
 
-| Language | Model | Recall, any type | Persons | Organizations | Addresses |
-|---|---|---|---|---|---|
-| Romanian | `bert-base-romanian-ner` | **93.3%** (208 of 223 tokens) | 96.2% | 90.7% | 100% |
-| English | `bert-large-NER` | **81.6%** (280 of 343 tokens) | 91.6% | 74.9% | 81.0% |
+- `eval/mapa_eval.py` counts tokens on [MAPA](https://huggingface.co/datasets/joelniklaus/mapa), EU case law with anonymization labels (CC-BY-4.0). A token of a person, an organization, or an address counts as found if any span covers it, with any type. Tokens that the policy keeps on purpose (titles, role words, country names) do not count.
+- `eval/corpus_eval.py` runs the whole pipeline (hide all documents together, then restore) on a folder of documents with a `gold.json` list of entities. It measures the mentions that the tool hides completely, the false hits (it writes them to a review file), the ids of one entity across documents, leaks in the output file, and how much of the text comes back unchanged. See the top of the file for the format. `python -m eval.tab_corpus` makes an English test corpus of 12 real court cases from [TAB](https://github.com/NorskRegnesentral/text-anonymization-benchmark) (MIT).
 
-Before the last changes to the clean-up rules, I tested three English models on the same data: `bert-base-NER` gave 77.6%, `roberta-large-ner-english` gave 80.2%, and `bert-large-NER` gave 83.1%. `bert-large-NER` is about 4 times slower than `bert-base-NER`. Set `en_model` in the config file to change the model. The clean-up rules for the demo documents cost about one point of recall on MAPA (Romanian 93.7% to 93.3%, English 83.1% to 81.6%). The recall for persons did not fall.
+Recall of the mentions that the tool should hide:
 
-The tool hides more than MAPA marks. For example, the Romanian set has 129 organization tokens in the labels, and the tool hides 792, because it hides all organizations by default. With `keep_public_bodies: true` it hides 367 (Romanian) and 390 (English). Recall does not change in Romanian and falls by 0.6 points in English. Choose the setting for your documents.
+| Test set | `low` (BERT) | `medium` (+ GLiNER) |
+|---|---|---|
+| MAPA Romanian (3 documents, 223 tokens) | 93.3% | 94.2% |
+| MAPA English (3 documents, 343 tokens) | 81.6% | **93.3%** |
+| TAB English (12 court cases, 468 mentions) | 80.3% | **86.3%** |
+| Demo documents (5 made-up PDFs, 241 mentions) | 99.2% | 99.6% |
+
+On English text, GLiNER adds 6 to 12 points of recall for the price of twice the run time. On the Romanian MAPA text it adds 2 tokens, which is within the noise of a 3-document test. The persons in MAPA English go from 91.6% to 94.7%, and the organizations from 74.9% to 93.2%. The newer model GLiNER2-PII (`fastino/gliner2-privacy-filter-PII-multi`) is worse than GLiNER: it has no label for organizations, and its model card does not list Romanian.
+
+Before the latest changes, I tested three English models on MAPA: `bert-base-NER` gave 77.6%, `roberta-large-ner-english` gave 80.2%, and `bert-large-NER` gave 83.1%. `bert-large-NER` is about 4 times slower than `bert-base-NER`. Set `en_model` in the config file to change the model.
+
+The tool hides more than MAPA marks. For example, the Romanian set has 129 organization tokens in the labels, and the tool hides 790, because it hides all organizations by default. With `keep_public_bodies: true` it hides fewer. Choose the setting for your documents. The precision on MAPA is a lower bound for this reason.
 
 Read these numbers with care:
 
-- The test set is small (one to two documents for each language, about 100 to 200 person tokens). The numbers show the size of the problem. They are not a guarantee.
-- MAPA is EU case law. Your documents (contracts, letters) are different. The remaining misses on MAPA are mostly names of court cases (`CIF`, `Impact`) and public bodies (`the Czech Government`).
+- **No test set is a Romanian contract with real names.** There is no open set like that. The Romanian numbers come from 3 documents of EU case law (one point is 2 tokens) and from made-up documents that we wrote ourselves. The 10 to 15 real documents of the lawyer are the missing test.
+- TAB is English court cases, not contracts. MAPA is EU case law. Your documents are different. The misses that remain on MAPA are mostly names of court cases and public bodies. On TAB they are mostly public bodies and case numbers (`36110/97`, 0 of 17 found).
+- The test sets are small. The numbers show the size of the problem. They are not a guarantee.
 - **The models do not find 100%.** This is why the tool has the sweep, the config file, `verify`, and the rule "read the output".
 
-To run the benchmark again, download `test.jsonl` and `validation.jsonl` from the dataset page into `eval/mapa_raw/`, and run `python eval/mapa_eval.py --lang ro` (or `--lang en`).
+To run the benchmarks again:
+
+```bash
+# MAPA: download test.jsonl and validation.jsonl from the dataset page into eval/mapa_raw/
+.venv/bin/python -m eval.mapa_eval --lang en --level medium --name bert+gliner
+
+# TAB: download echr_test.json from the TAB repository into eval/tab_raw/
+.venv/bin/python -m eval.tab_corpus --count 12
+.venv/bin/python -m eval.corpus_eval eval/corpora/tab-en --level medium --name bert+gliner
+
+# your own documents: a folder with the files and a gold.json (see eval/corpus_eval.py)
+.venv/bin/python -m eval.corpus_eval path/to/folder --level high --llm-model qwen3.5:4b --name bert+gliner+qwen3.5-4b
+
+.venv/bin/python -m eval.report            # makes docs/results.md from eval/results/
+```
+
+The review files that `corpus_eval` writes (`_review/`) contain real text from the documents. They are in `.gitignore`. Keep your own test documents outside git too (`eval/corpora/private/` is ignored).
 
 ## Limits of the MVP
 
@@ -252,21 +307,24 @@ To run the benchmark again, download `test.jsonl` and `validation.jsonl` from th
 - **Dates and amounts stay visible** unless you add `DATE_TIME` or `MONEY` to `hide`. Facts that are not names can still identify a person. The tool does not look for vehicle plates, dates of birth (only the CNP), signatures, stamps, or photos.
 - **Not tested in Word.** The tests check the file structure, and the demo files pass an XML schema check. No test opened the result in Microsoft Word or LibreOffice.
 - **File properties.** For `.docx`, the tool removes the author, the title, and similar fields from the file properties of the hidden file. Restore does not bring them back.
+- **Levels `medium` and `high` cost time and memory.** GLiNER makes the run 2 to 4 times slower and needs about 1 GB more. The LLM of level `high` needs Ollama and a model of 1 to 6 GB. All times in this file are from one Apple M1 Pro with 16 GB.
+- **Level `high` is not measured.** The code and the tests are ready, but no real LLM has run on the test sets. Do not trust it more than the other levels.
 - **No encryption, no login, one user.** The vault is a plain file. The API is for one local user.
 
 ## Next steps
 
-- Test GLiNER next to the two BERT models. Presidio 2.2.366 has a `GLiNERRecognizer` (it needs the `gliner` package).
-- Add a small local LLM (for example Qwen3.5 through Ollama) as a checker. It reads the hidden text and lists the names that it still sees. The code finds these texts and hides them. The LLM never edits the document and never removes a hit. It must run on this computer.
+The list with reasons and the open questions is in [`docs/experiments.md`](docs/experiments.md).
+
+- Measure level `high` with real LLMs (Qwen3.5 in four sizes), on the same test sets.
+- Build the Romanian test set: 10 to 15 real documents of the firm, with a gold list. It decides the default level for Romanian.
+- Test a real AI tool (Claude Code, Codex, Copilot) on hidden Word files, not a script.
 - Add an encrypted vault, and a small web page where the lawyer sees and corrects the hidden items.
-- Link short names to full names with a review step.
-- Restore each name in the form that the document had. Now one form comes back for each entity, and the Word demo shows it (a short name comes back long).
+- Link short names to full names with a review step. Restore each name in the form that the document had.
 - Add OCR for scanned PDFs, and Word or PDF output for the final document.
-- Measure on real, labeled legal documents from the firm.
 
 ## Data and licenses
 
-- Romanian model: MIT (trained on RONEC). English model: MIT.
+- Romanian model: MIT (trained on RONEC). English model: MIT. GLiNER model `urchade/gliner_multi_pii-v1`: Apache-2.0. GLiNER2 model `fastino/gliner2-privacy-filter-PII-multi`: Apache-2.0. Qwen3.5 models: Apache-2.0 (check the license of the model that you choose in Ollama).
 - PDF reader: `pdfminer.six` (MIT). The demo PDFs are made with `reportlab` (BSD, in the `dev` extras) and a serif font from your system (Times New Roman, Liberation Serif, or DejaVu Serif). The PDFs are in `data/demo/`, so you need neither to run the demo.
-- Benchmark data: MAPA (CC-BY-4.0). The sample and demo documents are made up. All names are fictional, and the checksums are valid only in form. E-mail addresses use the reserved `.example` domain, and the UK phone number is in the range that Ofcom keeps for television drama.
+- Benchmark data: MAPA (CC-BY-4.0). TAB court cases (MIT): the script `eval/tab_corpus.py` makes the test corpus from the file that you download; the cases are not in this repository. The sample and demo documents are made up. All names are fictional, and the checksums are valid only in form. E-mail addresses use the reserved `.example` domain, and the UK phone number is in the range that Ofcom keeps for television drama.
 - The Romanian legal NER set LegalNERo is CC-BY-NC-ND. It is not used here.
