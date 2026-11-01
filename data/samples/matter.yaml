@@ -1,0 +1,11 @@
+# Known entities. The tool hides them in every document, also where the model does not find them.
+keep_public_bodies: true
+entities:
+  - type: PERSON
+    name: Ion Popescu
+    aliases: [Popescu, dl. Popescu]
+  - type: PERSON
+    name: Maria Ionescu
+  - type: ORGANIZATION
+    name: SC Alfa Construct SRL
+    aliases: [Alfa Construct, Alfa]

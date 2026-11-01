@@ -1,0 +1,62 @@
+{
+  "must_hide": [
+    "Ion Popescu",
+    "POPESCU ION",
+    "Popescu Ion",
+    "Maria Ionescu",
+    "IONESCU MARIA",
+    "ALFA CONSTRUCT",
+    "Alfa Construct",
+    "Beta Logistic",
+    "Northwind",
+    "Jane Doe",
+    "1750418401237",
+    "2881102120456",
+    "31415920",
+    "27182818",
+    "RO65BTRLRONCRT0123456789",
+    "RO82RNCB0082044231234567",
+    "ion.popescu@alfaconstruct.ro",
+    "jane.doe@northwind.co.uk",
+    "0722 123 456",
+    "0744 987 654",
+    "+44 20 7946 0958",
+    "Memorandumului",
+    "Calea Victoriei",
+    "Baker Street",
+    "J12/345/2018",
+    "1234/3/2024",
+    "2024-CV-00456",
+    "RX nr. 123456",
+    "Cluj-Napoca",
+    "Timișoara",
+    "Brașov",
+    "Lungă"
+  ],
+  "must_keep": [
+    "BENEFICIAR",
+    "PRESTATOR",
+    "Contractor",
+    "25.000 EUR",
+    "EUR 18,000",
+    "România",
+    "Romania",
+    "Art. 1"
+  ],
+  "visible_ok": [
+    "Judecătoria Cluj-Napoca"
+  ],
+  "docx_must_hide": [
+    "Ion Popescu",
+    "Maria Ionescu",
+    "Vasile Georgescu",
+    "Alfa Construct",
+    "ALFA CONSTRUCT",
+    "0722 123 456",
+    "Cluj-Napoca",
+    "ion.popescu@alfaconstruct.ro",
+    "1234/3/2024",
+    "Andrei Avocat",
+    "Cabinet Avocat Test"
+  ]
+}

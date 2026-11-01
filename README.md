@@ -78,7 +78,50 @@ lda restore anonymized/*.anon.txt --matter demo --out restored
 
 ## Demo for a lawyer
 
-The folder `data/demo/` has a made-up case with five long PDF documents. A Romanian farm exporter (the client) sues its transport company for spoiled goods and late deliveries. The same client also settles a claim with a UK freight company.
+The demo has a made-up case with five long documents (four Romanian, one English, about 6,500 words). A Romanian farm exporter (the client) sues its transport company for spoiled goods and late deliveries. The same client also settles a claim with a UK freight company. The pages have a letterhead, numbered articles, tables, signature blocks, a running header, and page numbers. All people and companies are made up.
+
+### Word files
+
+A lawyer works in Word, so the best demo uses `.docx` files. For a `.docx` file the tool changes only the text. The styles, tables, headers, footers, and tracked changes stay. The hidden file looks like the original, and the restored file is a Word file again.
+
+```bash
+python -m demo.run_docx      # about 30 seconds (the first run loads the models)
+```
+
+The script makes the five documents as Word files (real styles such as Title, Heading 1, and Clause; real tables; a header from page 2; page numbers as fields). It writes two cases to `demo-docx/`:
+
+| Case | Documents |
+|---|---|
+| `single-file/` | The transport contract. |
+| `multi-file/` | All five documents, hidden together. The client has the same id in all of them. |
+
+Each case has three folders:
+
+| Folder | Content |
+|---|---|
+| `1-original/` | The Word files as the lawyer has them. |
+| `2-anonymized/` | The files for the AI tool: the same files, with ids in place of the sensitive data. |
+| `3-restored/` | The files after the AI tool changed them and the tool put the real data back. |
+
+The AI step is a simulation. The script `demo/docx_edit.py` works on the anonymized files like an AI tool does. In the contract it changes two figures and adds a clause. In the notice it adds a paragraph. In the settlement it shortens a time limit and adds a clause. The changes are Word tracked changes by "AI assistant", and the new text has ids. Open a restored file in Word to see the changes in red, with the real names in the new text. The claim and the engagement contract have no change, so they come back as they were. The folder `demo-docx/_work/` has the vault (the real data) and the files that the simulated AI tool made.
+
+The Word demo shows these points:
+
+- The hidden file keeps the layout. Only the sensitive text is different.
+- The tool also hides data in the header, the footer, and the table cells, and it removes the author from the file properties.
+- The ids that the AI tool writes in a tracked change come back as real names, and the change stays a tracked change.
+- In `multi-file/`, one entity has one id in all five files.
+
+Limits of the Word demo:
+
+- No real AI tool edited a `.docx` file in this project. The simulation changes the text in the way that Word does it. A real tool can do it in another way. It must keep the ids as they are.
+- Restore gives one written form for each entity. In the demo, a header with `Rusu și Asociații` comes back as `Societatea Civilă de Avocați Rusu și Asociații`, and `S.C. CARPATICA LOGISTIC SOLUTIONS S.A.` comes back as `Carpatica Logistic Solutions S.A.`.
+- The tool removes the author and the title from the file properties. Restore does not bring them back.
+- The files pass an XML schema check, and a Mac preview shows them well. Nobody opened them in Microsoft Word or LibreOffice yet, so open them in Word before you show them. (The Mac preview ignores page breaks and some tab positions. This is a limit of the preview, not of the files.)
+
+### PDF files
+
+The folder `data/demo/` also has the five documents as PDF files. They show the PDF input of the tool.
 
 | File | Content | Pages |
 |---|---|---|
@@ -88,14 +131,14 @@ The folder `data/demo/` has a made-up case with five long PDF documents. A Roman
 | `04_contract_asistenta_juridica.ro.pdf` | Engagement contract and power of attorney, with an ID card and a CNP | 3 |
 | `05_settlement_agreement.en.pdf` | English settlement agreement with a UK company, with bank details | 5 |
 
-The pages have a letterhead, numbered articles, tables, signature blocks, a running header, and page numbers. About 6,500 words in total.
-
 ```bash
 python -m demo.run_demo            # all steps, about 25 seconds
 python -m demo.run_demo --pause    # waits for Enter before each step (for a live demo)
 ```
 
 The steps: (1) show the PDFs, (2) hide all five with one command, (3) show what the AI tool gets, (4) show that one entity has one id in all documents, and run `verify`, (5) change the contract like an AI tool does, (6) put the real data back, (7) join two written forms of one company with `merge`. The output goes to `demo-output/`.
+
+Each output file is a text file, because an AI tool can edit text but not a PDF. The demo also writes a PDF copy of each text file, for people to look at (`demo/render_pdf.py`). In the PDF copy, each id has a yellow background. In `ai/`, the paragraphs that the AI tool changed are green. In `final/`, the PDF has the real names and no banner. A PDF copy has the same words as the text file. It does not have the layout of the original PDF. Give the AI tool the `.txt` files. To make PDF copies of other text files, run `python -m demo.render_pdf FILE.txt` (add `--restored` for a text with real data).
 
 To use a real AI tool in step 5, give it the folder `demo-output/hidden/` and the prompt in `data/demo/ai_prompt.md`. Save its text for the contract and run `python -m demo.run_demo --revised FILE.txt`. Set `HF_HUB_OFFLINE=1` to show that the models run with no network.
 
@@ -108,7 +151,7 @@ What to show and say:
 - `verify` finds no known text in the hidden files. After the AI step, the restore gives the real names back, also in the new clause.
 - Say the limits: the tool does not find 100%, so read the hidden files. Say that the restored text has one written form for each entity, and that the vault is not encrypted.
 
-To make the PDFs again, run `python -m demo.build`. The documents are test data. The articles of law that they name are real, but no lawyer has checked the documents. Ask the lawyer to read them before you call them examples of good drafting.
+To make the PDFs again, run `python -m demo.build`. The Word demo makes its own Word files each time. The documents are test data. The articles of law that they name are real, but no lawyer has checked the documents. Ask the lawyer to read them before you call them examples of good drafting.
 
 Other commands:
 
@@ -173,9 +216,9 @@ The API returns JSON. Each document has `content_base64`, and text files also ha
 .venv/bin/python -m pytest -m "not models" # fast tests, no models, under 1 second
 ```
 
-There are 116 tests (94 of them run without the models, in under 1 second). They cover the patterns and checksums, the vault, the Word and PDF file handling, the restore step with changed ids, the multi-document rules, the CLI, the API, and two full runs with the real models: on the sample case and on the demo case. In the first run, none of 32 listed secrets stays in any output. In the second run, none of 57 listed secrets stays in the five PDFs, the client has the same id in all five documents, and no common word is hidden as a name.
+There are 137 tests (108 of them run without the models, in about 10 seconds). They cover the patterns and checksums, the vault, the Word and PDF file handling, the restore step with changed ids, the multi-document rules, the CLI, the API, the simulated AI edits with tracked changes, and three full runs with the real models: on the sample case, on the five demo PDFs, and on the five demo Word files. In the first run, none of 32 listed secrets stays in any output. In the other two runs, none of 57 listed secrets stays in the five files, the client has the same id in all five documents, and no common word is hidden as a name. For the Word files the tests also check that the layout, the styles, and the table rows stay, and that the author name is gone from the file properties, the headers, and the footers.
 
-The first run on the demo PDFs found problems that the short sample texts did not show: the model marked common words as names (`personal`, `poștal`, `jud`), date ranges were read as phone numbers, e-mail addresses with an unknown domain ending were not found, and the word sweep then spread each of these errors through all documents. The tests now guard against them.
+The first run on the demo PDFs found problems that the short sample texts did not show: the model marked common words as names (`personal`, `poștal`, `jud`), date ranges were read as phone numbers, e-mail addresses with an unknown domain ending were not found, and the word sweep then spread each of these errors through all documents. The tests now guard against them. The Word demo found one more: in a running header such as `Alfa S.R.L. / Beta S.A.`, the model put the `/` into the first name, and restore lost the slash. The clean-up now removes separators (`/`, `|`, dashes) at the edge of a name.
 
 **Detection quality.** The script `eval/mapa_eval.py` measures the detector on [MAPA](https://huggingface.co/datasets/joelniklaus/mapa), a set of EU legal texts with anonymization labels (CC-BY-4.0). It counts tokens. A token of a person, an organization, or an address counts as found if any span covers it, with any type. Tokens that the policy keeps on purpose (titles, role words, country names) do not count.
 
@@ -207,7 +250,8 @@ To run the benchmark again, download `test.jsonl` and `validation.jsonl` from th
 - **File types.** A PDF needs a text layer. A scanned PDF gives an error (there is no OCR). A page without text in a mixed PDF gets a visible note in the output. No `.doc`: save it as `.docx`. The output for a PDF is a text file, not a PDF or a Word file. In `.docx`, the tool does not change images, embedded objects, field codes, or link targets. `verify` reports known text that it finds in them.
 - **PDF layout.** The tool finds paragraphs again from the place of the lines. It works on the demo PDFs, which a PDF library made. Test it on your own PDFs before you trust it. Table cells can run together in one line, text boxes and columns can change the reading order, and a header or footer that repeats on many pages is removed (a header on the first page stays).
 - **Dates and amounts stay visible** unless you add `DATE_TIME` or `MONEY` to `hide`. Facts that are not names can still identify a person. The tool does not look for vehicle plates, dates of birth (only the CNP), signatures, stamps, or photos.
-- **Not tested in Word.** The tests check the file structure. No test opened the result in Microsoft Word or LibreOffice.
+- **Not tested in Word.** The tests check the file structure, and the demo files pass an XML schema check. No test opened the result in Microsoft Word or LibreOffice.
+- **File properties.** For `.docx`, the tool removes the author, the title, and similar fields from the file properties of the hidden file. Restore does not bring them back.
 - **No encryption, no login, one user.** The vault is a plain file. The API is for one local user.
 
 ## Next steps
@@ -216,6 +260,7 @@ To run the benchmark again, download `test.jsonl` and `validation.jsonl` from th
 - Add a small local LLM (for example Qwen3.5 through Ollama) as a checker. It reads the hidden text and lists the names that it still sees. The code finds these texts and hides them. The LLM never edits the document and never removes a hit. It must run on this computer.
 - Add an encrypted vault, and a small web page where the lawyer sees and corrects the hidden items.
 - Link short names to full names with a review step.
+- Restore each name in the form that the document had. Now one form comes back for each entity, and the Word demo shows it (a short name comes back long).
 - Add OCR for scanned PDFs, and Word or PDF output for the final document.
 - Measure on real, labeled legal documents from the firm.
 

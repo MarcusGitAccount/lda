@@ -1,0 +1,27 @@
+# Known entities of the case. The tool hides them in every document, also where the model misses them.
+keep_public_bodies: true     # courts and ministries stay visible
+entities:
+  - type: ORGANIZATION
+    name: Mureșul Agro Trans S.R.L.
+    aliases: ["MUREȘUL AGRO TRANS S.R.L.", "Mureșul Agro Trans"]
+  - type: PERSON
+    name: Cristian-Mihai Bălan
+    aliases: ["BĂLAN CRISTIAN-MIHAI", "Cristian Bălan", "dl. Bălan", "Bălan"]
+  - type: ORGANIZATION
+    name: Carpatica Logistic Solutions S.A.
+    aliases: ["CARPATICA LOGISTIC SOLUTIONS S.A.", "Carpatica Logistic Solutions", "Carpatica"]
+  - type: PERSON
+    name: Gabriel-Tudor Lazăr
+    aliases: ["Gabriel Lazăr", "dl. Lazăr", "Lazăr"]
+  - type: ORGANIZATION
+    name: Societatea Civilă de Avocați Rusu și Asociații
+    aliases: ["Rusu și Asociații"]
+  - type: PERSON
+    name: Anca-Maria Rusu
+    aliases: ["Anca Rusu", "av. Rusu"]
+  - type: ORGANIZATION
+    name: Northgate Freight Forwarding Ltd
+    aliases: ["Northgate"]
+  - type: PERSON
+    name: Margaret Ellison
+    aliases: ["Ms Ellison", "Ellison"]
