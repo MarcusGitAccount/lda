@@ -81,6 +81,7 @@ _ORG_FORMS = {
     "co", "plc", "gmbh", "ag", "bv", "nv", "sarl", "sas", "spa", "srl-d",
 }  # fmt: skip
 _ORG_NOISE = {"sc", "the"}  # "SC" means "commercial company". It adds no identity.
+LEGAL_FORMS = _ORG_FORMS  # for the sweep: "SRL" and "S.R.L." are one form
 
 
 def _tokens(folded: str) -> list[str]:
@@ -96,9 +97,11 @@ def person_key(surface: str) -> str:
     tokens = [t for t in tokens if t]
     while len(tokens) > 1 and tokens[0].replace(".", "") in _PERSON_TITLES:
         tokens.pop(0)
+    # "Ana-Maria Popescu" and "Ana Maria Popescu" are the same name.
+    parts = [part for token in tokens for part in token.split("-") if part]
     # Romanian documents write the family name first or last. Sorting makes
     # both orders give the same key.
-    return " ".join(sorted(tokens))
+    return " ".join(sorted(parts))
 
 
 def org_key(surface: str) -> str:

@@ -15,6 +15,7 @@ import json
 import re
 import urllib.error
 import urllib.request
+import warnings
 from dataclasses import dataclass
 
 from .gliner_ner import chunks
@@ -26,13 +27,16 @@ LLM_TYPES = ["PERSON", "ORGANIZATION", "ADDRESS", "LOCATION"]
 LLM_CHUNK = 1500  # characters. A small model reads less well in a long text.
 LLM_OVERLAP = 100
 LLM_SCORE = 0.5
+LLM_MAX_REPLY = 512  # tokens. A small model can repeat itself without end; a list of names is much shorter.
 
 SYSTEM = (
     "You check a legal document that was made anonymous. The tool replaced sensitive data with tags "
     "such as [PERSON] or [ORGANIZATION]. Find the sensitive data that the tool missed: names of "
     "people, names of companies and other organizations, street addresses, and names of places. "
     "Copy each item exactly as it is in the text. Do not list tags. Do not list laws, courts, public "
-    "bodies, job titles, or common words. If the tool missed nothing, return an empty list."
+    "bodies, job titles, or common words. If the tool missed nothing, return an empty list. "
+    'Reply with JSON only, in this form: {"items": [{"text": "...", "type": "PERSON"}]}. '
+    "The type is PERSON, ORGANIZATION, ADDRESS or LOCATION."
 )
 SCHEMA = {
     "type": "object",
@@ -52,6 +56,14 @@ SCHEMA = {
 
 class LlmUnavailable(RuntimeError):
     """Ollama does not run, or it does not have the model."""
+
+
+class LlmTimeout(LlmUnavailable):
+    """The server did not answer one request in time (a small model that repeats itself)."""
+
+
+class NoStructuredOutput(LlmUnavailable):
+    """The server cannot force the format of the reply. (Ollama answers 501 for the Qwen3.5 models.)"""
 
 
 @dataclass
@@ -76,12 +88,41 @@ def mask(text: str, spans: list[Span]) -> str:
     return "".join(parts)
 
 
+def parse_items(content: str) -> list[Candidate] | None:
+    """Read the reply of the model. Return None if it has no usable JSON.
+
+    A model that is not forced to the format can add words around the JSON, or a code fence.
+    A wrong item does no harm: the caller keeps a string only if it is really in the text.
+    """
+    text = re.sub(r"```(?:json)?", "", content)
+    for opening, closing in (("{", "}"), ("[", "]")):
+        start, end = text.find(opening), text.rfind(closing)
+        if start < 0 or end <= start:
+            continue
+        try:
+            data = json.loads(text[start : end + 1])
+        except ValueError:
+            continue
+        items = data.get("items") if isinstance(data, dict) else data
+        if not isinstance(items, list):
+            continue
+        return [
+            Candidate(item["text"].strip(), item["type"])
+            for item in items
+            if isinstance(item, dict) and isinstance(item.get("text"), str) and item.get("type") in LLM_TYPES
+        ]
+    return None
+
+
 class OllamaChecker:
     def __init__(self, model: str = LLM_MODEL, host: str = LLM_HOST, timeout: float = 300.0):
         self.model = model
         self.host = host.rstrip("/")
         self.timeout = timeout
         self.requests = 0  # for the experiment log
+        self.structured = True  # ask the server to force the JSON format; we stop if it cannot
+        self.invalid = 0  # replies that had no usable JSON, for the experiment log
+        self.skipped = 0  # pieces of text that the LLM did not check, because the server was too slow
 
     # --- the server ---------------------------------------------------------------
 
@@ -93,7 +134,13 @@ class OllamaChecker:
         try:
             with urllib.request.urlopen(request, timeout=self.timeout) as response:
                 return json.loads(response.read())
+        except urllib.error.HTTPError as error:
+            if error.code == 501:
+                raise NoStructuredOutput(f"Ollama cannot force the format for '{self.model}' (HTTP 501).") from error
+            raise LlmUnavailable(f"Ollama returned an error at {self.host} ({error}).") from error
         except (urllib.error.URLError, TimeoutError, ConnectionError) as error:
+            if isinstance(error, TimeoutError) or isinstance(getattr(error, "reason", None), TimeoutError):
+                raise LlmTimeout(f"Ollama did not answer in {self.timeout:.0f} s ({error}).") from error
             raise LlmUnavailable(
                 f"Ollama does not answer at {self.host} ({error}). Start it, or use level 'medium' or 'low'."
             ) from error
@@ -108,22 +155,25 @@ class OllamaChecker:
 
     def ask(self, hidden_text: str) -> list[Candidate]:
         self.requests += 1
-        reply = self._call(
-            "/api/chat",
-            {
-                "model": self.model,
-                "stream": False,
-                "think": False,  # a thinking model is slower and not better on this job
-                "format": SCHEMA,
-                "options": {"temperature": 0, "num_ctx": 4096},
-                "messages": [{"role": "system", "content": SYSTEM}, {"role": "user", "content": hidden_text}],
-            },
-        )
-        try:
-            items = json.loads(reply["message"]["content"])["items"]
-            return [Candidate(i["text"].strip(), i["type"]) for i in items if i.get("type") in LLM_TYPES]
-        except (KeyError, ValueError, TypeError):
-            return []  # the model did not follow the format. We lose its hits for this piece.
+        body = {
+            "model": self.model,
+            "stream": False,
+            "think": False,  # a thinking model is slower and not better on this job
+            "options": {"temperature": 0, "num_ctx": 4096, "num_predict": LLM_MAX_REPLY},
+            "messages": [{"role": "system", "content": SYSTEM}, {"role": "user", "content": hidden_text}],
+        }
+        if self.structured:
+            try:
+                reply = self._call("/api/chat", {**body, "format": SCHEMA})
+            except NoStructuredOutput:
+                self.structured = False  # the prompt asks for JSON, and `parse_items` reads what comes back
+        if not self.structured:
+            reply = self._call("/api/chat", body)
+        items = parse_items(str(reply.get("message", {}).get("content", "")))
+        if items is None:
+            self.invalid += 1  # the model did not follow the format. We lose its hits for this piece.
+            return []
+        return items
 
     def missed(self, text: str, spans: list[Span]) -> list[Span]:
         """Spans for the strings that the LLM sees in the hidden text. Each one is in `text`."""
@@ -132,7 +182,13 @@ class OllamaChecker:
         for _, piece in chunks(hidden, LLM_CHUNK, LLM_OVERLAP):
             if not re.search(r"\w{3}", _TAG.sub("", piece)):
                 continue  # no text to check
-            for candidate in self.ask(piece):
+            try:
+                candidates = self.ask(piece)
+            except LlmTimeout as error:
+                self.skipped += 1  # do not lose the whole document for one piece, but say so
+                warnings.warn(f"The LLM check skipped a piece of text: {error}", stacklevel=2)
+                continue
+            for candidate in candidates:
                 if self._real(candidate.text, piece):
                     found.setdefault(candidate.text, candidate.type)
         result = []

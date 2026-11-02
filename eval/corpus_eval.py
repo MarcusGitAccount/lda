@@ -258,6 +258,16 @@ def main() -> int:
         "restore_words_equal": round(restore_ok, 4),
         "words_per_second": round(words / elapsed, 1) if elapsed else None,
     }
+    if settings.use_llm:
+        checker = detector.checker(settings)  # the gain of the LLM is the difference to the run at level medium
+        metrics["llm"] = {
+            "model": settings.llm_model,
+            "requests": checker.requests,
+            "invalid_replies": checker.invalid,
+            "skipped_pieces": checker.skipped,
+            "structured_output": checker.structured,
+        }
+        print(f"llm {settings.llm_model}: requests={checker.requests} invalid replies={checker.invalid}")
     if not args.no_record:
         path = tracker.record(f"corpus-{folder.name}", name, settings, metrics, elapsed)
         print(f"saved {path.relative_to(tracker.ROOT)}")

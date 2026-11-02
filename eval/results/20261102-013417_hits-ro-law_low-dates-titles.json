@@ -1,0 +1,62 @@
+{
+  "when": "2026-11-02T01:34:17+00:00",
+  "dataset": "hits-ro-law",
+  "name": "low+dates+titles",
+  "settings": {
+    "level": "low",
+    "min_score": 0.4,
+    "keep_public_bodies": false,
+    "ro_model": "dumitrescustefan/bert-base-romanian-ner",
+    "en_model": "dslim/bert-large-NER",
+    "gliner_model": null,
+    "gliner_threshold": null,
+    "llm_model": null
+  },
+  "seconds": 182.1,
+  "metrics": {
+    "documents": 40,
+    "words": 70698,
+    "hits": 4006,
+    "hits_per_1000_words": 56.66,
+    "by_type": {
+      "DATE_TIME": 494,
+      "ORGANIZATION": 1299,
+      "PERSON": 943,
+      "PHONE_NUMBER": 20,
+      "LOCATION": 633,
+      "ADDRESS": 4,
+      "URL": 3,
+      "JOB_TITLE": 602,
+      "CASE_NUMBER": 3,
+      "IP_ADDRESS": 4,
+      "RO_TRADE_REG": 1
+    },
+    "different_strings": {
+      "DATE_TIME": 230,
+      "ORGANIZATION": 393,
+      "PERSON": 787,
+      "PHONE_NUMBER": 20,
+      "LOCATION": 192,
+      "ADDRESS": 4,
+      "URL": 2,
+      "JOB_TITLE": 77,
+      "CASE_NUMBER": 1,
+      "IP_ADDRESS": 1,
+      "RO_TRADE_REG": 1
+    },
+    "words_per_second": 388.2
+  },
+  "environment": {
+    "commit": "251208c",
+    "dirty": true,
+    "python": "3.13.5",
+    "machine": "Darwin arm64",
+    "packages": {
+      "presidio-analyzer": "2.2.366",
+      "transformers": "4.57.6",
+      "torch": "2.15.0",
+      "gliner": "0.2.30",
+      "legal-anonymizer": "0.1.0"
+    }
+  }
+}

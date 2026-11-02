@@ -1,0 +1,58 @@
+{
+  "when": "2026-11-01T23:38:22+00:00",
+  "dataset": "hits-ro-law",
+  "name": "ro-law-low+lexemes",
+  "settings": {
+    "level": "low",
+    "min_score": 0.4,
+    "keep_public_bodies": false,
+    "ro_model": "dumitrescustefan/bert-base-romanian-ner",
+    "en_model": "dslim/bert-large-NER",
+    "gliner_model": null,
+    "gliner_threshold": null,
+    "llm_model": null
+  },
+  "seconds": 476.2,
+  "metrics": {
+    "documents": 40,
+    "words": 70698,
+    "hits": 3056,
+    "hits_per_1000_words": 43.23,
+    "by_type": {
+      "ORGANIZATION": 1322,
+      "PERSON": 897,
+      "LOCATION": 802,
+      "PHONE_NUMBER": 20,
+      "ADDRESS": 4,
+      "URL": 3,
+      "CASE_NUMBER": 3,
+      "IP_ADDRESS": 4,
+      "RO_TRADE_REG": 1
+    },
+    "different_strings": {
+      "ORGANIZATION": 391,
+      "PERSON": 787,
+      "LOCATION": 194,
+      "PHONE_NUMBER": 20,
+      "ADDRESS": 4,
+      "URL": 2,
+      "CASE_NUMBER": 1,
+      "IP_ADDRESS": 1,
+      "RO_TRADE_REG": 1
+    },
+    "words_per_second": 148.5
+  },
+  "environment": {
+    "commit": "251208c",
+    "dirty": true,
+    "python": "3.13.5",
+    "machine": "Darwin arm64",
+    "packages": {
+      "presidio-analyzer": "2.2.366",
+      "transformers": "4.57.6",
+      "torch": "2.15.0",
+      "gliner": "0.2.30",
+      "legal-anonymizer": "0.1.0"
+    }
+  }
+}

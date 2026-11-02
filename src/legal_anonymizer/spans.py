@@ -6,6 +6,7 @@ import re
 from dataclasses import dataclass, replace
 
 from .entities import priority
+from .romanian import inflections
 from .textnorm import fold, generic_key
 
 # Rank of a span from the vault or from the user's seed list. It wins over all.
@@ -129,6 +130,9 @@ DEFAULT_KEEP = [
     "Luxemburg", "Luxembourg", "Portugalia", "Portugal", "Suedia", "Sweden",
     "Danemarca", "Denmark", "Norvegia", "Norway", "Finlanda", "Finland",
     "Cehia", "Czechia", "Slovacia", "Slovakia", "Croația", "Croatia", "Serbia",
+    # The genitive of the names that are not made by a rule (see `keep_set`).
+    "Uniunii Europene", "Republicii Moldova", "Regatului Unit", "Marii Britanii",
+    "Statelor Unite ale Americii", "Statelor Unite", "Țărilor de Jos",
     # Labels of fields. They are not private. The value that follows is.
     "IBAN", "CNP", "CUI", "CIF", "VAT", "TVA", "SWIFT", "BIC", "SWIFT/BIC", "ORC", "CI", "BI",
     # Names of laws and treaties. They are not private.
@@ -275,7 +279,13 @@ def refine(text: str, span: Span, keep: set[str], public_bodies: bool = False) -
 
 
 def keep_set(extra: list[str] | None = None) -> set[str]:
-    return {generic_key(item) for item in [*DEFAULT_KEEP, *(extra or [])]}
+    """The folded texts that stay visible. A one-word name also stays in its Romanian forms:
+    `România` keeps `României` ("Constituția României"), `Germania` keeps `Germaniei`."""
+    keep = {generic_key(item) for item in [*DEFAULT_KEEP, *(extra or [])]}
+    for item in [*DEFAULT_KEEP, *(extra or [])]:
+        if item.isalpha() and item[:1].isupper() and not item.isupper() and len(item) >= 5:
+            keep |= inflections(generic_key(item))
+    return keep
 
 
 # --- combine spans ----------------------------------------------------------------

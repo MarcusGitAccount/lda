@@ -155,3 +155,48 @@ def test_the_cases_are_picked_at_fixed_steps_and_the_size_is_checked():
     first = tab_corpus.pick(documents, 5)
     assert [d["doc_id"] for d in first] == [d["doc_id"] for d in tab_corpus.pick(documents, 5)]
     assert len(first) == 5 and all(len(d["text"].split()) == 2000 for d in first)
+
+
+# --- the sample of Romanian legal acts and the hits report ------------------------------
+
+
+def _act(kind="LEGE", year=2010, text_words=900, number="12", **extra):
+    from datetime import date
+
+    return {"id": 1, "type": kind, "document_number": number, "adopted_at": date(year, 5, 1), "content": "cuvant " * text_words, **extra}
+
+
+def test_an_act_must_have_a_known_type_a_date_and_a_fit_length():
+    from eval.ro_law_corpus import eligible
+
+    assert eligible(_act("LEGE")) == "lege"
+    assert eligible(_act("HOTĂRÎRE")) == "hotarare" == eligible(_act("HOTĂRÂRE"))  # both spellings
+    assert eligible(_act("RAPORT")) is None  # not a kind of act that we want
+    assert eligible(_act(text_words=100)) is None and eligible(_act(text_words=9000)) is None
+    assert eligible(_act(year=1995)) is None
+    assert eligible({**_act(), "adopted_at": None}) is None
+
+
+def test_the_sample_is_small_fixed_and_has_every_group():
+    from eval.ro_law_corpus import reservoir
+
+    rows = [_act(kind, number=f"{kind}{i}") for kind in ("LEGE", "ORDIN", "DECRET") for i in range(40)]
+    first = reservoir(iter(rows), 5)
+    again = reservoir(iter(rows), 5)
+    assert {g: [a["document_number"] for a in acts] for g, acts in first.items()} == {
+        g: [a["document_number"] for a in acts] for g, acts in again.items()
+    }
+    assert sorted(first) == ["decret", "lege", "ordin"] and all(len(acts) == 5 for acts in first.values())
+
+
+def test_the_file_name_is_plain_ascii():
+    from eval.ro_law_corpus import file_name
+
+    assert file_name(_act("LEGE", 2010, number="12/2010 bis"), "lege") == "lege-2010-12-2010-bis.ro.txt"
+    assert file_name(_act("ORDONANȚĂ", 2020, number="ȘTEFAN"), "ordonanta") == "ordonanta-2020-stefan.ro.txt"
+
+
+def test_the_hits_report_has_its_own_table():
+    from eval.report import row_for, row_hits
+
+    assert row_for("hits-ro-law") is row_hits

@@ -183,6 +183,69 @@ EN_ADDRESS = (
 )
 
 
+# --- optional types: calendar dates and job titles ----------------------------------
+
+_MONTHS_NO_MAY = (
+    "ianuarie|februarie|martie|aprilie|iunie|iulie|august|septembrie|octombrie|noiembrie|decembrie|"
+    "january|february|march|april|june|july|september|october|november|december"
+)
+# "mai" and "may" are also common words ("2 mai multe zile"), so they need a year.
+_MONTH = rf"(?:{_MONTHS_NO_MAY}|mai|may|(?:ian|jan|feb|mar|apr|iun|jun|iul|jul|aug|sept?|oct|noi|nov|dec)\.)"
+_ORD = r"(?:st|nd|rd|th)?"
+CALENDAR_DATE = (
+    r"(?<![\w.])(?:"
+    r"\d{1,2}[./-]\d{1,2}[./-]\d{4}"  # 12.03.2024
+    r"|\d{4}-\d{2}-\d{2}"  # 2024-03-12
+    rf"|\d{{1,2}}{_ORD}\s+(?:of\s+|din\s+)?{_MONTH}\s*,?\s*\d{{4}}"  # 12 martie 2025, 12th of March 2025
+    rf"|{_MONTH}\s+\d{{1,2}}{_ORD}\s*,\s*\d{{4}}"  # March 12, 2025
+    rf"|{_MONTH}\s*,?\s*\d{{4}}"  # martie 2025, March 2025
+    rf"|\d{{1,2}}{_ORD}\s+(?:of\s+|din\s+)?(?:{_MONTHS_NO_MAY})"  # 12 martie
+    r")(?!\w)"
+)
+_CALENDAR = re.compile(CALENDAR_DATE, re.IGNORECASE)
+
+
+def calendar_dates(text: str) -> list[tuple[int, int]]:
+    """The positions of the calendar dates in a text."""
+    return [m.span() for m in _CALENDAR.finditer(text) if _date_score(m.group(0))]
+
+
+def _date_score(value: str) -> Optional[float]:
+    parts = re.fullmatch(r"(\d{1,4})[./-](\d{1,2})[./-](\d{1,4})", value)
+    if parts:
+        a, b, c = (int(g) for g in parts.groups())
+        if a > 31:  # year first
+            ok = 1 <= b <= 12 and 1 <= c <= 31
+        else:  # day first or month first
+            ok = (1 <= a <= 31 and 1 <= b <= 12) or (1 <= a <= 12 and 1 <= b <= 31)
+        return 0.9 if ok else None
+    return 0.9
+
+
+# Occupations. A party role such as "Vânzătorul" or "Beneficiarul" is not here: it is not a job.
+_RO_TITLES = (
+    r"director|administrator|manager|pre[sșş]edinte|vicepre[sșş]edinte|secretar|ministru|prim-ministru|primar|"
+    r"viceprimar|prefect|judec[aă]tor|procuror|grefier|notar|avocat|executor|consilier|contabil|economist|"
+    r"auditor|inginer|arhitect|medic|profesor|conferen[tțţ]iar|lector|coordonator|lichidator|curator|"
+    r"[sșş]ef|inspector|tehnician|traduc[aă]tor"
+)
+_RO_ENDING = r"(?:ul|ului|ii|ilor|ei|ele|elor|i|a|e)?"
+_RO_MODIFIERS = (
+    r"general|generală|executiv|financiar|tehnic|comercial|adjunct|unic|delegat|public|judec[aă]toresc|"
+    r"juridic|[sșş]ef|de\s+stat|de\s+proiect|de\s+v[aâ]nz[aă]ri|de\s+departament|de\s+serviciu|de\s+birou"
+)
+_EN_TITLES = (
+    r"chief\s+(?:executive|financial|technology|operating|legal)\s+officer|C[EFTL]O|COO|managing\s+director|"
+    r"general\s+(?:manager|counsel)|project\s+manager|vice[- ]president|president|chair(?:man|woman|person)|"
+    r"manager|director|secretary|treasurer|solicitor|barrister|attorney|judge|magistrate|registrar|clerk|"
+    r"accountant|auditor|engineer|architect|physician|doctor|professor|lecturer|head\s+of\s+\w+|paralegal|"
+    r"notary(?:\s+public)?|bailiff|liquidator"
+)
+JOB_TITLE = (
+    rf"(?<![\w-])(?:(?:{_RO_TITLES}){_RO_ENDING}(?:\s+(?:{_RO_MODIFIERS}){_RO_ENDING}){{0,2}}|{_EN_TITLES})(?![\w-])"
+)
+
+
 def _cnp_score(value: str) -> Optional[float]:
     return 1.0 if valid_cnp(value) else None
 
@@ -222,4 +285,7 @@ def build_pattern_recognizers(language: str) -> list[LocalRecognizer]:
         R("ADDRESS", POSTAL_CODE, language, group=1, score=0.8, name="PostalCode"),
         R("ADDRESS", UK_POSTCODE, language, group=1, score=0.8, flags=exact, name="UkPostcode"),
         R("COMPANY_NUMBER", COMPANY_NUMBER, language, group=1, score=0.9, name="CompanyNumber"),
+        # Optional: they run only if the policy hides DATE_TIME or JOB_TITLE.
+        R("DATE_TIME", CALENDAR_DATE, language, score_fn=_date_score, name="CalendarDate"),
+        R("JOB_TITLE", JOB_TITLE, language, score=0.8, name="JobTitle"),
     ]

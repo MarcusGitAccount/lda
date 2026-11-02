@@ -19,7 +19,7 @@ from .gliner_ner import GLINER_NAME, gliner_recognizer
 from .lang import SUPPORTED, detect_language
 from .llm_check import OllamaChecker
 from .ner import EnglishNerRecognizer, RomanianNerRecognizer
-from .patterns import build_pattern_recognizers
+from .patterns import build_pattern_recognizers, calendar_dates
 from .spans import NAME_TYPES, Span, keep_set, refine
 
 NER_NAMES = {"RomanianBertNer", "EnglishBertNer", GLINER_NAME}
@@ -139,14 +139,22 @@ class Detector:
             if result.entity_type == "PHONE_NUMBER" and not looks_like_phone(text[result.start : result.end]):
                 continue
             raw = Span(result.start, result.end, result.entity_type, result.score, "presidio")
-            # The model can mark a span over a line break or a tab. We cut first and clean each piece.
-            for piece in split_at_breaks(text, raw):
-                span = refine(text, piece, keep, settings.keep_public_bodies)
-                if span is None:
-                    continue
-                if from_ner and span.type in NAME_TYPES and is_common_word(text, span, context):
-                    continue
-                spans.append(span)
+            raws = [raw]
+            if from_ner and result.entity_type == "DATE_TIME":
+                # The Romanian model also marks durations ("30 de zile") and years. Only a calendar date is hidden.
+                raws = [
+                    Span(result.start + a, result.start + b, "DATE_TIME", result.score, "presidio")
+                    for a, b in calendar_dates(text[result.start : result.end])
+                ]
+            for raw in raws:
+                # The model can mark a span over a line break or a tab. We cut first and clean each piece.
+                for piece in split_at_breaks(text, raw):
+                    span = refine(text, piece, keep, settings.keep_public_bodies)
+                    if span is None:
+                        continue
+                    if from_ner and span.type in NAME_TYPES and is_common_word(text, span, context):
+                        continue
+                    spans.append(span)
         if settings.use_llm:
             spans += self._llm_spans(text, spans, settings, keep, context)
         return merge_initials(text, spans)

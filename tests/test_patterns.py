@@ -126,3 +126,75 @@ def test_ranges_of_dates_and_table_rows_are_not_phone_numbers():
 
     for value in ["05.08.2024 – 14.02.2025", "2 23.10.2024", "4 30.01.2025", "12/03/2024 15/03/2024"]:
         assert not looks_like_phone(value), value
+
+
+# --- optional types: calendar dates and job titles ----------------------------------
+
+
+def dates(text, language="ro"):
+    return [value for kind, value in find(text, language) if kind == "DATE_TIME"]
+
+
+def titles(text, language="ro"):
+    return [value for kind, value in find(text, language) if kind == "JOB_TITLE"]
+
+
+@pytest.mark.parametrize(
+    ("text", "language", "expected"),
+    [
+        ("semnat la 12.03.2024.", "ro", ["12.03.2024"]),
+        ("din data de 12/03/2024", "ro", ["12/03/2024"]),
+        ("semnat la 12 martie 2025", "ro", ["12 martie 2025"]),
+        ("până la 1 Decembrie 2024", "ro", ["1 Decembrie 2024"]),
+        ("născut la 5 mai 1980", "ro", ["5 mai 1980"]),
+        ("în luna martie 2025", "ro", ["martie 2025"]),
+        ("până pe 12 martie vine", "ro", ["12 martie"]),
+        ("dated March 12, 2024 and", "en", ["March 12, 2024"]),
+        ("on the 12th of March 2025", "en", ["12th of March 2025"]),
+        ("born 1980-05-05", "en", ["1980-05-05"]),
+        ("by 1 December 2024", "en", ["1 December 2024"]),
+        ("in March 2025", "en", ["March 2025"]),
+        ("due May 2025", "en", ["May 2025"]),
+    ],
+)
+def test_calendar_dates(text, language, expected):
+    assert dates(text, language) == expected
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Termen: 30 de zile",  # a duration
+        "Anul 2024 a fost greu",  # a year
+        "timp de 2 mai multe zile",  # "mai" is a common word
+        "clauza 4.1.10 și 5.2.12",  # clause numbers
+        "Version 1.2.3",
+        "the parties may 2 times",
+        "valoarea de 13.45.2024",  # not a date: month 45
+        "12.34.5678",
+    ],
+)
+def test_things_that_are_not_calendar_dates(text):
+    assert dates(text, "ro") == [] and dates(text, "en") == []
+
+
+@pytest.mark.parametrize(
+    ("text", "language", "expected"),
+    [
+        ("Directorul general a semnat", "ro", ["Directorul general"]),
+        ("comunicat Directorului financiar", "ro", ["Directorului financiar"]),
+        ("administratorul unic al societății", "ro", ["administratorul unic"]),
+        ("avocatul părții", "ro", ["avocatul"]),
+        ("șeful de departament", "ro", ["șeful de departament"]),
+        ("the Chief Executive Officer of", "en", ["Chief Executive Officer"]),
+        ("our Managing Director", "en", ["Managing Director"]),
+        ("the Head of Sales", "en", ["Head of Sales"]),
+    ],
+)
+def test_job_titles(text, language, expected):
+    assert titles(text, language) == expected
+
+
+@pytest.mark.parametrize("text", ["Vânzătorul și Cumpărătorul", "Prestatorul", "the Buyer and the Seller", "directoral"])
+def test_party_roles_and_other_words_are_not_job_titles(text):
+    assert titles(text, "ro") == [] and titles(text, "en") == []

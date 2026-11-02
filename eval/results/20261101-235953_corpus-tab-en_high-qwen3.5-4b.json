@@ -1,0 +1,94 @@
+{
+  "when": "2026-11-01T23:59:53+00:00",
+  "dataset": "corpus-tab-en",
+  "name": "high-qwen3.5-4b",
+  "settings": {
+    "level": "high",
+    "min_score": 0.4,
+    "keep_public_bodies": false,
+    "ro_model": "dumitrescustefan/bert-base-romanian-ner",
+    "en_model": "dslim/bert-large-NER",
+    "gliner_model": "urchade/gliner_multi_pii-v1",
+    "gliner_threshold": 0.5,
+    "llm_model": "qwen3.5:4b"
+  },
+  "seconds": 353.6,
+  "metrics": {
+    "documents": 12,
+    "words": 20463,
+    "gold_entities": 239,
+    "mentions": {
+      "tp": 404,
+      "fp": 441,
+      "fn": 64,
+      "precision": 0.4781,
+      "recall": 0.8632,
+      "f1": 0.6154,
+      "f2": 0.7435
+    },
+    "by_gold_type": {
+      "CODE": {
+        "tp": 0,
+        "fp": 0,
+        "fn": 17,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "f2": 0.0
+      },
+      "LOCATION": {
+        "tp": 32,
+        "fp": 0,
+        "fn": 2,
+        "precision": 1.0,
+        "recall": 0.9412,
+        "f1": 0.9697,
+        "f2": 0.9524
+      },
+      "ORGANIZATION": {
+        "tp": 172,
+        "fp": 0,
+        "fn": 37,
+        "precision": 1.0,
+        "recall": 0.823,
+        "f1": 0.9029,
+        "f2": 0.8532
+      },
+      "PERSON": {
+        "tp": 200,
+        "fp": 0,
+        "fn": 8,
+        "precision": 1.0,
+        "recall": 0.9615,
+        "f1": 0.9804,
+        "f2": 0.969
+      }
+    },
+    "split_entities": 41,
+    "entities_seen": 171,
+    "merged_ids": 8,
+    "leaked_forms": 29,
+    "must_keep_missing": 0,
+    "restore_words_equal": 0.9988,
+    "words_per_second": 57.9,
+    "llm": {
+      "model": "qwen3.5:4b",
+      "requests": 93,
+      "invalid_replies": 0,
+      "structured_output": false
+    }
+  },
+  "environment": {
+    "commit": "251208c",
+    "dirty": true,
+    "python": "3.13.5",
+    "machine": "Darwin arm64",
+    "packages": {
+      "presidio-analyzer": "2.2.366",
+      "transformers": "4.57.6",
+      "torch": "2.15.0",
+      "gliner": "0.2.30",
+      "legal-anonymizer": "0.1.0"
+    }
+  }
+}

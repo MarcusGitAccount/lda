@@ -21,6 +21,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .entities import TAGS, TYPE_BY_TAG
+from .romanian import INFLECTED_TYPES, derives_from, same_lexeme
 from .textnorm import collapse, entity_key, fold
 
 SCHEMA = """
@@ -132,6 +133,13 @@ class Vault:
         row = self.db.execute(
             "SELECT entity_id FROM entity_key WHERE type = ? AND key = ?", (entity_type, key)
         ).fetchone()
+        if row is None and not seed:
+            row = self._other_form(entity_type, key)
+            if row:  # remember this key, so the next search is a plain lookup
+                self.db.execute(
+                    "INSERT OR IGNORE INTO entity_key (type, key, entity_id) VALUES (?, ?, ?)",
+                    (entity_type, key, row["entity_id"]),
+                )
         if row:
             entity_id = self._root(row["entity_id"])
         else:
@@ -240,13 +248,36 @@ class Vault:
         row = self.db.execute("SELECT COALESCE(MAX(number), 0) + 1 AS n FROM entity WHERE type = ?", (entity_type,)).fetchone()
         return row["n"]
 
+    def _other_form(self, entity_type: str, key: str):
+        """Find an entity that has this name in another Romanian form ("Popescului" for "Popescu")."""
+        if entity_type not in INFLECTED_TYPES:
+            return None
+        words = key.split()
+        ordered = entity_type != "PERSON"  # the key of a person has sorted words
+        for row in self.db.execute("SELECT key, entity_id FROM entity_key WHERE type = ?", (entity_type,)):
+            if same_lexeme(row["key"].split(), words, ordered=ordered):
+                return row
+        return None
+
     def _canonical(self, entity_id: int) -> str:
         # A seed name wins. Then the most common form. Then the first one seen.
-        row = self.db.execute(
-            "SELECT original FROM form WHERE entity_id = ? ORDER BY seed DESC, count DESC, rowid ASC LIMIT 1",
+        # A form that is only an inflection of another form ("Popescului") does not win over its base.
+        rows = self.db.execute(
+            "SELECT original, folded FROM form WHERE entity_id = ? ORDER BY seed DESC, count DESC, rowid ASC",
             (entity_id,),
-        ).fetchone()
-        return row["original"] if row else ""
+        ).fetchall()
+        if not rows:
+            return ""
+        kind = self.db.execute("SELECT type FROM entity WHERE id = ?", (entity_id,)).fetchone()["type"]
+        if kind in INFLECTED_TYPES and len(rows) > 1:
+            ordered = kind != "PERSON"
+            for row in rows:
+                words = row["folded"].split()
+                if not any(
+                    derives_from(words, other["folded"].split(), ordered=ordered) for other in rows if other is not row
+                ):
+                    return row["original"]
+        return rows[0]["original"]
 
     def entity(self, entity_id: int) -> Entity:
         row = self.db.execute("SELECT * FROM entity WHERE id = ?", (self._root(entity_id),)).fetchone()

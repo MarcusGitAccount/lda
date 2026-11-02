@@ -1,3 +1,5 @@
+import pytest
+
 from legal_anonymizer.spans import Span, keep_set, refine, resolve_overlaps
 
 KEEP = keep_set()
@@ -174,3 +176,26 @@ def test_the_rest_of_a_cut_name_with_a_real_word_stays():
         ("Construct", "ORGANIZATION"),
         ("Beta", "PERSON"),
     ]
+
+
+# --- a country stays visible in its Romanian forms (LDA-30) ---------------------------------
+
+
+@pytest.mark.parametrize(
+    "form",
+    ["România", "României", "ROMÂNIEI", "Germaniei", "Franței", "Italiei", "Uniunii Europene", "Republicii Moldova", "Regatului Unit"],
+)
+def test_a_country_stays_visible_in_its_romanian_forms(form):
+    span = refine(form, Span(0, len(form), "LOCATION", 0.9, "presidio"), keep_set())
+    assert span is not None and span.type == "KEEP", form
+
+
+def test_a_label_in_capitals_does_not_get_forms():
+    # IBAN, CNP: a short label in capitals is kept as it is, and gets no Romanian form.
+    assert "ibanul" not in keep_set() and "iban" in keep_set()
+
+
+def test_a_private_place_is_not_kept_because_a_country_is():
+    for place in ["Brașov", "Luduș", "Chețani"]:
+        span = refine(place, Span(0, len(place), "LOCATION", 0.9, "presidio"), keep_set())
+        assert span is not None and span.type == "LOCATION", place

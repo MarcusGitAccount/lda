@@ -22,6 +22,7 @@ TAGS = {
     "CASE_NUMBER": "CASE_NO",
     "NRP": "NRP",
     "DATE_TIME": "DATE",
+    "JOB_TITLE": "JOB",
     "MONEY": "MONEY",
 }
 TYPE_BY_TAG = {tag: entity for entity, tag in TAGS.items()}
@@ -33,8 +34,12 @@ STRUCTURED = {
     "ID_DOCUMENT", "CASE_NUMBER",
 }  # fmt: skip
 
-# What we hide if the user gives no other list. DATE_TIME and MONEY are
-# optional: they are often needed to understand a contract. NRP (nationality,
+# What we hide if the user gives no other list. DATE_TIME, JOB_TITLE and MONEY are
+# optional: they are often needed to understand a contract. A deadline such as
+# "30 days after [DATE_001]" cannot be worked out by an AI tool when the date is hidden.
+# DATE_TIME means a calendar date (12.03.2024, 12 martie 2025, March 2025). A duration
+# ("30 de zile") and a bare year stay visible. JOB_TITLE comes from a list of titles
+# (director, administrator, avocat, chief executive officer). NRP (nationality,
 # religion, political group) is optional too. In legal text the model finds mostly
 # words like "român" in "societate de drept român". Add NRP if your documents
 # describe people in this way.

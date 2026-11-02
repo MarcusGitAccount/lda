@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import json
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import pytest
 
 from legal_anonymizer.config import Settings
 from legal_anonymizer.detector import Detector
-from legal_anonymizer.llm_check import LLM_MODEL, LlmUnavailable, OllamaChecker, mask
+from legal_anonymizer.llm_check import LLM_MODEL, LLM_MAX_REPLY, SYSTEM, LlmTimeout, LlmUnavailable, OllamaChecker, mask, parse_items
 from legal_anonymizer.spans import Span
 
 TEXT = "Contractul este semnat de Ion Popescu cu Xyzzy Quuxington, la Brașov."
@@ -19,11 +20,14 @@ TEXT = "Contractul este semnat de Ion Popescu cu Xyzzy Quuxington, la Brașov."
 class FakeOllama:
     """Answers /api/tags and /api/chat. `items` is the list that the "LLM" returns."""
 
-    def __init__(self, items=None, content=None, models=(LLM_MODEL,)):
+    def __init__(self, items=None, content=None, models=(LLM_MODEL,), structured=True, delay=0.0):
         self.items = items or []
         self.content = content
         self.models = list(models)
-        self.requests: list[dict] = []
+        self.delay = delay  # seconds to wait before an answer to /api/chat: a model that is too slow
+        self.structured = structured  # False: answer 501 to a request with `format`, as Ollama does for Qwen3.5
+        self.requests: list[dict] = []  # the requests that were answered
+        self.rejected = 0
         fake = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -43,6 +47,15 @@ class FakeOllama:
 
             def do_POST(self):
                 body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+                time.sleep(fake.delay)
+                if "format" in body and not fake.structured:
+                    fake.rejected += 1
+                    data = json.dumps({"error": "structured output is unavailable"}).encode()
+                    self.send_response(501)
+                    self.send_header("Content-Length", str(len(data)))
+                    self.end_headers()
+                    self.wfile.write(data)
+                    return
                 fake.requests.append(body)
                 content = fake.content if fake.content is not None else json.dumps({"items": fake.items})
                 self._send({"message": {"role": "assistant", "content": content}})
@@ -124,6 +137,79 @@ def test_the_request_asks_for_a_list_and_no_thinking(fake):
     request = server.requests[0]
     assert request["think"] is False and request["options"]["temperature"] == 0
     assert request["format"]["properties"]["items"]["type"] == "array"
+
+
+def test_the_prompt_tells_the_model_the_format(fake):
+    # The server cannot always force the format, so the prompt must describe it.
+    assert "JSON" in SYSTEM and '"items"' in SYSTEM
+    server = fake(items=[])
+    OllamaChecker(host=server.host).missed(TEXT, [])
+    assert "JSON" in server.requests[0]["messages"][0]["content"]
+
+
+def test_a_server_that_cannot_force_the_format_is_asked_once_and_the_checker_goes_on(fake):
+    server = fake(items=[{"text": "Xyzzy Quuxington", "type": "PERSON"}], structured=False)
+    checker = OllamaChecker(host=server.host)
+    spans = checker.missed(TEXT + " " * 2000 + TEXT, hidden_popescu())  # two chunks
+    assert [TEXT[s.start : s.end] for s in spans if s.start < len(TEXT)] == ["Xyzzy Quuxington"]
+    assert server.rejected == 1  # it did not try again for the second chunk
+    assert all("format" not in request for request in server.requests)
+    assert checker.structured is False and len(server.requests) >= 2
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        '{"items": [{"text": "Xyzzy Quuxington", "type": "PERSON"}]}',
+        '```json\n{"items": [{"text": "Xyzzy Quuxington", "type": "PERSON"}]}\n```',
+        'Here is the list: {"items": [{"text": "Xyzzy Quuxington", "type": "PERSON"}]} Done.',
+        '[{"text": "Xyzzy Quuxington", "type": "PERSON"}]',
+        '<think>\n\n</think>\n\n{"items": [{"text": "Xyzzy Quuxington", "type": "PERSON"}]}',
+    ],
+)
+def test_the_reply_is_read_even_with_words_around_the_json(content):
+    assert parse_items(content) == parse_items('{"items": [{"text": "Xyzzy Quuxington", "type": "PERSON"}]}')
+    assert [(i.text, i.type) for i in parse_items(content)] == [("Xyzzy Quuxington", "PERSON")]
+
+
+@pytest.mark.parametrize("content", ["I cannot help with that.", "", "{broken", '{"other": 1}', '"text"'])
+def test_a_reply_with_no_usable_json_is_none(content):
+    assert parse_items(content) is None
+
+
+def test_items_of_an_unknown_type_or_without_text_are_dropped():
+    content = '{"items": [{"text": "A", "type": "DATE"}, {"type": "PERSON"}, {"text": "Ion Zorg", "type": "PERSON"}]}'
+    assert [i.text for i in parse_items(content)] == ["Ion Zorg"]
+
+
+def test_the_checker_counts_the_replies_that_it_could_not_read(fake):
+    server = fake(content="I cannot help with that.")
+    checker = OllamaChecker(host=server.host)
+    checker.missed(TEXT, [])
+    assert checker.invalid == 1
+
+
+def test_the_length_of_a_reply_is_limited(fake):
+    # A small model can repeat itself without end. Without a limit, one piece can take minutes.
+    server = fake(items=[])
+    OllamaChecker(host=server.host).missed(TEXT, [])
+    assert server.requests[0]["options"]["num_predict"] == LLM_MAX_REPLY
+
+
+def test_a_piece_that_times_out_is_skipped_with_a_warning_and_the_next_piece_is_checked(fake):
+    server = fake(items=[{"text": "Xyzzy Quuxington", "type": "PERSON"}], delay=0.5)
+    checker = OllamaChecker(host=server.host, timeout=0.2)
+    with pytest.warns(UserWarning, match="skipped a piece"):
+        spans = checker.missed(TEXT, hidden_popescu())
+    assert spans == [] and checker.skipped == 1
+    server.delay = 0.0  # the model is fast again: the checker still works
+    assert len(OllamaChecker(host=server.host).missed(TEXT, hidden_popescu())) == 1
+
+
+def test_a_server_that_is_down_is_still_an_error_and_a_timeout_is_a_kind_of_it():
+    with pytest.raises(LlmUnavailable):
+        OllamaChecker(host="http://127.0.0.1:9", timeout=1).check_ready()
+    assert issubclass(LlmTimeout, LlmUnavailable)
 
 
 def test_a_text_without_words_is_not_sent(fake):

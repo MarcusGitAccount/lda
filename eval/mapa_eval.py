@@ -31,7 +31,7 @@ from eval import tracker
 from eval.metrics import Counts
 from legal_anonymizer.config import LEVELS, Settings
 from legal_anonymizer.detector import Detector
-from legal_anonymizer.spans import DEFAULT_KEEP, ROLE_WORDS, TITLES
+from legal_anonymizer.spans import ROLE_WORDS, TITLES, keep_set
 from legal_anonymizer.textnorm import fold
 
 HERE = Path(__file__).parent
@@ -40,7 +40,8 @@ NO_SPACE_AFTER = set("([")
 
 # Tokens that the policy keeps on purpose: titles, role words and country names.
 KEPT_WORDS = {fold(w).strip(".") for w in TITLES | ROLE_WORDS}
-KEPT_PLACES = {fold(w).strip(".") for entry in DEFAULT_KEEP for w in entry.split()}
+# The same list that the detector keeps, with the Romanian forms (`României` for `România`).
+KEPT_PLACES = {w.strip(".") for entry in keep_set() for w in entry.split()}
 
 
 def kept_on_purpose(label: str, token: str) -> bool:
@@ -127,6 +128,8 @@ def main() -> int:
     predicted = defaultdict(int)  # predicted type -> tokens
     predicted_right = defaultdict(int)  # predicted type -> tokens that are gold of that class
     misses = []
+    llm_gain = 0  # gold tokens that only the LLM covers
+    llm_noise = 0  # tokens that only the LLM hides, and that are not gold
     hidden_or_not = Counts()  # tokens of the three classes: is it hidden?
     started = time.time()
     n_tokens = 0
@@ -147,6 +150,9 @@ def main() -> int:
             hidden_or_not.tp += is_gold and is_hidden
             hidden_or_not.fn += is_gold and not is_hidden
             hidden_or_not.fp += is_hidden and not is_gold
+            only_llm = bool(over) and all(s.source == "llm" for s in over)
+            llm_gain += is_gold and only_llm
+            llm_noise += only_llm and is_hidden and not is_gold
             if label in GOLD_CLASSES and (args.raw or not kept_on_purpose(label, text[tok[0] : tok[1]])):
                 gold[label] += 1
                 if over:
@@ -193,6 +199,21 @@ def main() -> int:
         "predicted_tokens": dict(predicted),
         "tokens_per_second": round(n_tokens / elapsed, 1) if elapsed else None,
     }
+    if settings.use_llm:
+        checker = detector.checker(settings)
+        metrics["llm"] = {
+            "model": settings.llm_model,
+            "requests": checker.requests,
+            "invalid_replies": checker.invalid,
+            "skipped_pieces": checker.skipped,
+            "structured_output": checker.structured,
+            "gold_tokens_only_the_llm_covers": llm_gain,
+            "other_tokens_only_the_llm_hides": llm_noise,
+        }
+        print(
+            f"llm {settings.llm_model}: requests={checker.requests} invalid={checker.invalid} "
+            f"gold tokens only the LLM covers={llm_gain}  other tokens only the LLM hides={llm_noise}"
+        )
     if not args.no_record:
         name = args.name or settings.level
         path = tracker.record(f"mapa-{args.lang}-{'+'.join(args.splits)}", name, settings, metrics, elapsed)

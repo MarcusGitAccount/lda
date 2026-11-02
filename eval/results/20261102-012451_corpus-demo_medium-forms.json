@@ -1,0 +1,61 @@
+{
+  "when": "2026-11-02T01:24:51+00:00",
+  "dataset": "corpus-demo",
+  "name": "medium+forms",
+  "settings": {
+    "level": "medium",
+    "min_score": 0.4,
+    "keep_public_bodies": true,
+    "ro_model": "dumitrescustefan/bert-base-romanian-ner",
+    "en_model": "dslim/bert-large-NER",
+    "gliner_model": "urchade/gliner_multi_pii-v1",
+    "gliner_threshold": 0.5,
+    "llm_model": null
+  },
+  "seconds": 43.6,
+  "metrics": {
+    "documents": 5,
+    "words": 6490,
+    "gold_entities": 57,
+    "mentions": {
+      "tp": 240,
+      "fp": 71,
+      "fn": 1,
+      "precision": 0.7717,
+      "recall": 0.9959,
+      "f1": 0.8696,
+      "f2": 0.9412
+    },
+    "by_gold_type": {
+      "ANY": {
+        "tp": 240,
+        "fp": 0,
+        "fn": 1,
+        "precision": 1.0,
+        "recall": 0.9959,
+        "f1": 0.9979,
+        "f2": 0.9967
+      }
+    },
+    "split_entities": null,
+    "entities_seen": null,
+    "merged_ids": null,
+    "leaked_forms": 0,
+    "must_keep_missing": 0,
+    "restore_words_equal": 0.9852,
+    "words_per_second": 148.7
+  },
+  "environment": {
+    "commit": "251208c",
+    "dirty": true,
+    "python": "3.13.5",
+    "machine": "Darwin arm64",
+    "packages": {
+      "presidio-analyzer": "2.2.366",
+      "transformers": "4.57.6",
+      "torch": "2.15.0",
+      "gliner": "0.2.30",
+      "legal-anonymizer": "0.1.0"
+    }
+  }
+}

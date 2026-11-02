@@ -138,3 +138,31 @@ def test_a_leak_in_a_part_that_we_do_not_process_is_reported(case):
     result = engine.anonymize("link.docx", source)
     assert result.leaks, "the e-mail is in a link target; the check must find it"
     assert any(p.startswith("[EMAIL_") for p in result.leaks)
+
+
+# --- optional types: dates and job titles -------------------------------------------
+
+
+def test_dates_and_job_titles_are_hidden_when_the_policy_asks_for_it(detector, vault):
+    from legal_anonymizer.config import Settings
+    from legal_anonymizer.entities import DEFAULT_HIDE
+
+    settings = Settings(hide=set(DEFAULT_HIDE) | {"DATE_TIME", "JOB_TITLE"})
+    engine = Engine(vault, settings, detector)
+    text = (
+        "Directorul general Zorgblescu Quoxx a semnat la 12 martie 2025 contractul, cu un termen de 30 de zile. "
+        "Anul 2024 a fost greu. Contract signed on March 12, 2024 by the Managing Director."
+    )
+    out = engine.anonymize("doc.txt", text.encode(), language="ro").data.decode()
+    assert "12 martie 2025" not in out and "March 12, 2024" not in out
+    assert "Directorul general" not in out and "Managing Director" not in out
+    assert "30 de zile" in out and "Anul 2024" in out  # a duration and a year stay visible
+    back = engine.restore("doc.txt", out.encode()).data.decode()
+    assert "12 martie 2025" in back and "Directorul general" in back
+
+
+def test_dates_and_job_titles_stay_visible_by_default(detector, vault):
+    from legal_anonymizer.config import Settings
+
+    out = Engine(vault, Settings(), detector).anonymize("doc.txt", b"Directorul semneaza la 12 martie 2025.").data.decode()
+    assert "12 martie 2025" in out and "Directorul" in out
