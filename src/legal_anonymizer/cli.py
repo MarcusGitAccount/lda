@@ -93,13 +93,16 @@ def cmd_anonymize(args) -> int:
         bad = 0
         for (name, _), result in zip(files, results):
             target = out_dir / output_name(name, "anon")
+            if result.leaks:  # do not leave a leaking file next to the safe ones
+                target = out_dir / "needs-review" / target.name
+                target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(result.data)
             kinds = Counter(re.match(r"\[([A-Z_]+?)_\d+\]", p).group(1) for p in result.counts.elements())
             summary = ", ".join(f"{n} {k}" for k, n in sorted(kinds.items())) or "nothing found"
             print(f"{name} ({result.language}) -> {target}\n  hidden: {summary}")
             if result.leaks:
                 bad += 1
-                print(f"  WARNING: text of {', '.join(result.leaks)} is still in the file. Check it before you use it.")
+                print(f"  WARNING: text of {', '.join(result.leaks)} is still in the file. It is in the folder 'needs-review'. Check it before you use it.")
     if bad:
         print(f"\n{bad} file(s) have a warning.")
     print(
@@ -129,6 +132,9 @@ def cmd_restore(args) -> int:
             if result.unknown:
                 bad += 1
                 print(f"  WARNING: these ids are not in the vault and stay as they are: {', '.join(result.unknown)}")
+            if result.suspect:
+                bad += 1
+                print(f"  WARNING: this text looks like an id and was not restored: {', '.join(result.suspect)}")
     return 1 if bad else 0
 
 
@@ -146,7 +152,8 @@ def cmd_entities(args) -> int:
         for e in entities:
             others = [f for f in e.forms if f != e.canonical]
             extra = f"  also: {', '.join(others)}" if others else ""
-            print(f"{e.placeholder:18} {e.canonical}{extra}   [{', '.join(e.documents)}]")
+            note = "  (forgotten: not hidden any more)" if e.ignored else ""
+            print(f"{e.placeholder:18} {e.canonical}{extra}{note}   [{', '.join(e.documents)}]")
     return 0
 
 
@@ -171,6 +178,29 @@ def cmd_alias(args) -> int:
         except ValueError as error:
             raise SystemExit(f"Error: {error}") from error
         print(f"'{args.text}' is now another name of {entity.placeholder} ({entity.canonical}).")
+    return 0
+
+
+def cmd_forget(args) -> int:
+    with Vault(vault_path(args.home, args.matter)) as vault:
+        entity = vault.by_placeholder(args.entity)
+        if entity is None:
+            raise SystemExit(f"Error: unknown id {args.entity}")
+        vault.forget(entity.id)
+        print(f"{entity.placeholder} ({entity.canonical}) is not hidden any more. Old documents still restore.")
+    return 0
+
+
+def cmd_split(args) -> int:
+    with Vault(vault_path(args.home, args.matter)) as vault:
+        entity = vault.by_placeholder(args.entity)
+        if entity is None:
+            raise SystemExit(f"Error: unknown id {args.entity}")
+        try:
+            new = vault.split(entity.id, args.text)
+        except ValueError as error:
+            raise SystemExit(f"Error: {error}") from error
+        print(f"'{args.text}' is now {new.placeholder}. {entity.placeholder} keeps its other names.")
     return 0
 
 
@@ -250,6 +280,17 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("text", help="the other name")
     matter(p)
     p.set_defaults(func=cmd_alias)
+
+    p = sub.add_parser("forget", help="stop hiding an entity that is not sensitive (the model made a mistake)", parents=[home_option])
+    p.add_argument("entity", help="for example PERSON_007")
+    matter(p)
+    p.set_defaults(func=cmd_forget)
+
+    p = sub.add_parser("split", help="take one name out of an entity, when the tool joined two names", parents=[home_option])
+    p.add_argument("entity", help="for example PERSON_001")
+    p.add_argument("text", help="the name that gets its own id")
+    matter(p)
+    p.set_defaults(func=cmd_split)
 
     p = sub.add_parser("verify", help="look for known sensitive text in files", parents=[home_option])
     p.add_argument("files", nargs="+")

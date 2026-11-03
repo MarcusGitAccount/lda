@@ -43,7 +43,7 @@ The AI tool gets:
 4. **Sweep.** The tool looks in all documents of the batch for every known entity. It ignores case, accents, and spaces. For a person or a place it also looks for the Romanian forms of each word: the article (`Popescul`), the genitive and dative (`Popescului`, `Mariei`, `Brașovului`), the vocative (`Popescule`), and the family (`Popeștii`). The rules are in `src/legal_anonymizer/romanian.py`. They do not stem: `Pop` and `Popa` stay two names.
 5. **Give ids.** The vault (a local SQLite file for one case) gives each entity an id. A new written form of a known entity gets the old id. This includes a Romanian form that a rule makes from a known name. The restore step writes the base form (see the limits).
 6. **Write and check.** The tool writes the new file and looks in it for known text.
-7. **Restore.** `lda restore` finds the ids in a revised document and puts the real text back. It accepts small changes by the AI tool, for example `[PERSON_1]`, `[ person_001 ]`, or `\[PERSON\_001\]`.
+7. **Restore.** `lda restore` finds the ids in a revised document and puts the real text back. It accepts small changes by the AI tool, for example `[PERSON_1]`, `[ person_001 ]`, `[Person_001]`, `PERSON_001`, `[PERSOANĂ_001]`, `[ORGANIZATION_001]`, or `\[PERSON\_001\]`. If text that looks like an id is still in the file after the restore (for example `[PERSONNE_001]`), the tool prints a warning and exits with 1.
 
 ## Install
 
@@ -172,6 +172,8 @@ Other commands:
 | `lda verify FILES -m CASE` | Look for known sensitive text in files. Exit code 1 if it finds any. |
 | `lda merge PERSON_003 PERSON_001 -m CASE` | Say that two ids are one entity. Old documents still restore. |
 | `lda alias PERSON_001 "dl. Popescu" -m CASE` | Add another name to an entity. |
+| `lda split PERSON_001 "Mariei Ionescu" -m CASE` | Take one name out of an entity when the tool joined two names. It gets its own id. |
+| `lda forget PERSON_007 -m CASE` | Stop hiding an entity that is not sensitive (the model made a mistake). Old documents still restore. |
 | `lda entities -m CASE --json` | Show all entities as JSON. |
 | `lda serve` | Start the local API on `127.0.0.1:8000`. |
 
@@ -185,11 +187,11 @@ A level says how hard the tool looks for names. A higher level finds more, and i
 |---|---|---|---|
 | `low` (default) | patterns + the BERT models | the fastest | measured |
 | `medium` | + GLiNER, a second model that adds hits | 2 times slower in English, 4 times in Romanian, about 1 GB more | measured |
-| `high` | + a local LLM that reads the hidden text and lists the names that remain | the slowest (an LLM call for each 1,500 characters) | measured with Qwen3.5: **no useful gain, experimental** |
+| `high` | + a local LLM that reads the hidden text and lists the names that remain | the slowest (an LLM call for each 1,500 characters) | measured with Qwen3.5: **no gain shown, experimental** |
 
 Choose the level with `--level` (`lda anonymize --level medium ...`) or with `level:` in the config file. On the test sets, `medium` raises the recall on English text a lot (see "Tests and results"). On Romanian text the gain is too small to measure, so `low` stays the default until we test on real Romanian documents.
 
-**Level `high` did not pay off.** We measured Qwen3.5 in four sizes (0.8b, 2b, 4b, 9b) on the four test sets. In 14 comparisons with level `medium`, the LLM found a name that the models had missed in only two (3 and 4 tokens). It always hid other text as well (up to 368 tokens), and the F2 score never went up. The extra hits are nationalities, dates, currencies and legal references, not missed names (see `docs/experiments.md`, EXP-006). Use `medium`. The LLM can still help on messy real contracts, which we have not tested.
+**Level `high` showed no gain.** We measured Qwen3.5 in four sizes (0.8b, 2b, 4b, 9b) on the four test sets. In 14 comparisons with level `medium`, the LLM found a name that the models had missed in only two (3 and 4 tokens). It always hid other text as well (up to 368 tokens), and the F2 score never went up. The extra hits are nationalities, dates, currencies and legal references, not missed names (see `docs/experiments.md`, EXP-006). Use `medium`. The sets left little to find (after `medium`, only 13 to 23 gold tokens were missed), and the LLM also found nothing on the synthetic Romanian set (EXP-013). So the verdict is "no gain shown", not "no use": the LLM can still help on messy real contracts, which we have not tested.
 
 The LLM never edits the document and never removes a hit. It gets the text after hiding (tags in place of the data), and it returns a list of words. The tool accepts a word only if the word is really in that text. The LLM host must be on your computer (`127.0.0.1` or `localhost`). The tool refuses any other host, so the text cannot leave the computer. If a level cannot run (no GLiNER, no Ollama, no model), the tool stops with a clear message. It never goes to a lower level without telling you.
 
@@ -265,10 +267,14 @@ Recall of the mentions that the tool should hide:
 
 | Test set | `low` (BERT) | `medium` (+ GLiNER) |
 |---|---|---|
-| MAPA Romanian (3 documents, 223 tokens) | 93.3% | 94.2% |
+| MAPA Romanian (3 documents, 222 tokens) | 93.2% | 94.1% |
 | MAPA English (3 documents, 343 tokens) | 81.6% | **93.3%** |
 | TAB English (12 court cases, 468 mentions) | 80.3% | **86.3%** |
 | Demo documents (5 made-up PDFs, 241 mentions) | 99.2% | 99.6% |
+
+**Read these numbers with their scope.** The MAPA numbers come from the detector alone (no sweep, no vault), count tokens, and use 3 documents for each language. The demo documents were written by the same author as the tool, and the demo run is seeded with the 8 entities of `matter.yaml`. TAB leaves out the quasi-identifiers (dates, quantities, codes). None of these sets has surnames that are common words, hidden Word parts, or Romanian word forms in context. The adversarial review of 2026-11-02 (`docs/review/`) found failures of exactly these kinds. The numbers on these sets did not change when they were fixed (EXP-012).
+
+**Synthetic Romanian set** (`python -m eval.synth_eval`, 24 made-up documents with the gold list made by construction, no seed list): the review fixes raised the recall of the mentions from 84.7% to 97.7% and the entity recall (every mention of one entity hidden) from 81.0% to 94.0%. 5 of 24 documents still have a visible mention (all a lowercase surname alone), and there are 0 false joins. Only 6 of 24 restored documents are exactly as the original (the Romanian form of a name comes back as the base form). It is a regression set made by the author, not a measure of real contracts (EXP-013).
 
 On English text, GLiNER adds 6 to 12 points of recall for the price of twice the run time. On the Romanian MAPA text it adds 2 tokens, which is within the noise of a 3-document test. The persons in MAPA English go from 91.6% to 94.7%, and the organizations from 74.9% to 93.2%. The newer model GLiNER2-PII (`fastino/gliner2-privacy-filter-PII-multi`) is worse than GLiNER: it has no label for organizations, and its model card does not list Romanian.
 
@@ -309,14 +315,15 @@ The review files that `corpus_eval` writes (`_review/`) contain real text from t
 ## Limits of the MVP
 
 - **Detection is not perfect.** See above. The sweep knows the Romanian forms of a known name (`Popescului`, `Mariei`, `Brașovului`). It does not know a surname alone after the full name (`Popescu` after `Ion Popescu`), an initial (`I. Popescu`), or a form with a stem change that has no rule. A model can still miss a name in an unusual place.
+- **A surname that is a common word** (`Negru`, `Lupu`, `Brown`) is hidden when a title or a role word comes before it somewhere in the batch (`dl. Negru`, `Pârâtul Negru`, `Mr Brown`). With no such clue, and only at the start of a sentence, it can stay visible. A lowercase form of such a name (`culoare negru`) is not hidden, except in a document with no capital letter at all. A lowercase surname alone in a message is hidden only if the vault knows it alone.
 - **A short name is a new entity.** `Popescu` alone does not get the id of `Ion Popescu`, unless you add an alias or run `merge`. The tool does not guess, because a wrong guess puts the wrong name into a legal document.
 - **Companies with different legal forms stay apart.** `Alfa SRL` and `Alfa SA` get two ids. `Alfa` alone is a third one. In the demo, `FreshMart Distribuție` and `FreshMart Distribuție S.R.L.` get two ids, and step 7 joins them with `lda merge`.
 - **One written form comes back.** If an entity has several written forms (`POPESCU ION`, `Ion Popescu`, `Popescului`), restore writes the name from the config file, or else the most common base form. The restored text can differ from the original in these places. In the test with a real AI tool, `S.C. CARPATICA LOGISTIC SOLUTIONS S.A.` came back as `Carpatica Logistic Solutions S.A.`. A short name that you list as an alias also comes back as the full name: `(Northgate)` becomes `(Northgate Freight Forwarding Ltd)`. The demo documents show this.
-- **The AI tool can break an id.** The restore step accepts small changes. It does not accept an id with a Romanian ending (`[PERSON_001]ului`). Tell the AI tool to keep ids as they are, and to put the ending in a separate word. In one test (`docs/agent-test/`), a subagent with these rules kept all 110 ids in three files, and all 110 were restored. That is one agent, one run, and one prompt with the rules: test a plain prompt and other tools before you trust it.
+- **The AI tool can break an id.** The restore step accepts small changes (see step 7) and warns about text that looks like an id and is not restored. An id with a Romanian ending (`[PERSON_001]ului`) gets the right form for a person or a place (`Popescului`). Tell the AI tool to keep ids as they are, and to put the ending in a separate word. In one test (`docs/agent-test/`), a subagent with these rules kept all 110 ids in three files, and all 110 were restored. That is one agent, one run, and one prompt with the rules: test a plain prompt and other tools before you trust it.
 - **A language for each file.** The tool detects `ro` or `en` for the whole file. Use `--lang` to force it. The patterns work in both languages.
-- **File types.** A PDF needs a text layer. A scanned PDF gives an error (there is no OCR). A page without text in a mixed PDF gets a visible note in the output. No `.doc`: save it as `.docx`. The output for a PDF is a text file, not a PDF or a Word file. In `.docx`, the tool does not change images, embedded objects, field codes, or link targets. `verify` reports known text that it finds in them.
+- **File types.** A PDF needs a text layer. A scanned PDF gives an error (there is no OCR). A page without text in a mixed PDF gets a visible note in the output. No `.doc`: save it as `.docx`. The output for a PDF is a text file, not a PDF or a Word file. In `.docx`, the tool hides and restores text in the body, headers, footers, footnotes, comments, text boxes, the glossary, alt text, field codes, link targets, custom properties and custom XML, and it scrubs `people.xml` and the author fields. It does not read images (a scanned stamp) or embedded objects. The leak check reads attribute values too, so `verify` reports known text in any part that the tool did not change. A file with a leak is written to the folder `needs-review`.
 - **PDF layout.** The tool finds paragraphs again from the place of the lines. It works on the demo PDFs, which a PDF library made. Test it on your own PDFs before you trust it. Table cells can run together in one line, text boxes and columns can change the reading order, and a header or footer that repeats on many pages is removed (a header on the first page stays).
-- **Dates, job titles, and amounts stay visible** unless you add `DATE_TIME`, `JOB_TITLE`, or `MONEY` to `hide`. Hidden dates stop an AI tool from working out deadlines. Facts that are not names can still identify a person. The tool does not look for vehicle plates, dates of birth (only the CNP), signatures, stamps, or photos.
+- **Dates, job titles, and amounts stay visible** unless you add `DATE_TIME`, `JOB_TITLE`, or `MONEY` to `hide`. Hidden dates stop an AI tool from working out deadlines. Facts that are not names can still identify a person. The tool looks for the CNP, the CUI, trade register numbers (old and new form), car plates, land register and cadastre numbers, and policy numbers (after a context word). It does not look for dates of birth (only the CNP), contract numbers, signatures, stamps, or photos. The hidden files keep the name of the court, dates and amounts: a strong model may guess the parties from them (LDA-23). The tool is pseudonymization, not anonymization.
 - **Not tested in Word.** The tests check the file structure, and the demo files pass an XML schema check. No test opened the result in Microsoft Word or LibreOffice.
 - **File properties.** For `.docx`, the tool removes the author, the title, and similar fields from the file properties of the hidden file. Restore does not bring them back.
 - **Levels `medium` and `high` cost time and memory.** GLiNER makes the run 2 to 4 times slower and needs about 1 GB more. The LLM of level `high` needs Ollama and a model of 1 to 8 GB. All times in this file are from one Apple M1 Pro with 16 GB.
@@ -327,6 +334,9 @@ The review files that `corpus_eval` writes (`_review/`) contain real text from t
 
 The list with reasons and the open questions is in [`docs/experiments.md`](docs/experiments.md).
 
+- Party cues and short names of a party (`denumită în continuare „Alfa”`), so that the tool finds the parties without a seed list (LDA-42). A review page for the capitalized words that stay visible (LDA-43).
+- Next version of the synthetic Romanian set: 60 documents, a frozen list of hard cases, a dev and a holdout part, Word files with metadata (LDA-46); a gate that fails when recall drops (LDA-26).
+- Re-identification test: can a strong model guess the parties from the hidden files? (LDA-23)
 - Improve level `high` or drop it: filter the noise (nationalities, dates, currencies), test a prompt with examples, and test on the Romanian documents of the lawyer (LDA-28).
 - Build the Romanian test set: 10 to 15 real documents of the firm, with a gold list. It decides the default level for Romanian.
 - Test more AI tools (Claude Code, Codex, Copilot) and a plain prompt without the rules for ids. One subagent test is done (`docs/agent-test/`).

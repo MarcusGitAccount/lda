@@ -20,7 +20,8 @@ from .lang import SUPPORTED, detect_language
 from .llm_check import OllamaChecker
 from .ner import EnglishNerRecognizer, RomanianNerRecognizer
 from .patterns import build_pattern_recognizers, calendar_dates
-from .spans import NAME_TYPES, Span, keep_set, refine
+from .spans import NAME_TYPES, TITLES, Span, is_role, keep_set, refine
+from .textnorm import fold
 
 NER_NAMES = {"RomanianBertNer", "EnglishBertNer", GLINER_NAME}
 PHONE_REGIONS = ("RO", "GB", "US", "DE", "FR", "IT", "ES", "HU", "MD", "BG", "NL", "AT", "PL")
@@ -184,17 +185,37 @@ def looks_like_phone(value: str) -> bool:
     )
 
 
+# A name follows these words: "Mr Brown", "dl. Negru", "lui Negru", "Pârâtul Negru". "the", "a" and "al" do not
+# show a name ("the Parties").
+NAME_MARKERS = TITLES - {"the", "a", "an", "al", "ai", "ale"}
+
+
+def is_named_after_a_marker(word: str, text: str) -> bool:
+    """True if `text` has this word after a title or a role word ("Mr Brown", "Pârâtul Negru")."""
+    for match in re.finditer(rf"(?<![\w-])([^\W\d_]+)\.?\s+{re.escape(word)}(?![\w-])", text):
+        before = fold(match.group(1))
+        if before in NAME_MARKERS or is_role(before):
+            return True
+    return False
+
+
 def is_common_word(text: str, span: Span, context: str | None = None) -> bool:
     """A model span of one word is a common noun, if the text also writes it in lowercase.
 
     The model marks "Șoferul" at the start of a sentence as a person. A real name is not
-    written in lowercase somewhere else in the text ("șoferul").
+    written in lowercase somewhere else in the text ("șoferul"). The model also marks a defined
+    term ("Părților", "Prestatorul") as a person.
+    A surname can be a common word too ("Brown", "Negru"). The text shows that it is a name when it
+    writes it after a title or a role word ("Mr Brown", "Pârâtul Negru"). Then the span stays. The
+    sweep of the vault hides the other places, and it does not hide the lowercase word (see `KnownForms.matches`).
     """
     word = text[span.start : span.end]
     if " " in word or "-" in word or word == word.lower():
         return False
     lower = word.lower()
-    return re.search(rf"(?<![\w-]){re.escape(lower)}(?![\w-])", context or text) is not None
+    if re.search(rf"(?<![\w-]){re.escape(lower)}(?![\w-])", context or text) is None:
+        return False
+    return not (span.type == "PERSON" and is_named_after_a_marker(word, context or text))
 
 
 _INITIAL_GAP = re.compile(r"\.?\s+")

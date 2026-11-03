@@ -125,8 +125,38 @@ CUI_CONTEXT = (
     r"((?:RO\s?)?\d{2,10})(?!\d)"
 )
 CUI_WITH_PREFIX = r"(?<![\w])(RO\s?\d{2,10})(?![\w])"
+# A CNP written in groups: "CNP 180 0101 221144", "CNP: 1-800101-221144". The checksum looks at the 13 digits.
+CNP_SPACED = (
+    r"\b(?:C\.?N\.?P\.?|cod\s+numeric\s+personal|personal\s+numeric\s+code)\s*(?:nr\.?|no\.?|:|-)?\s*"
+    r"(\d(?:[ .\-]?\d){12})(?!\d)"
+)
 
 TRADE_REG = r"(?<![\w/])([JFC]\s?\d{1,2}\s?/\s?\d{1,6}\s?/\s?\d{2,4})(?![\w/])"
+
+# The number of the trade register in the new form (2020): "J2020001234408".
+TRADE_REG_NEW = r"(?<![\w/])([JFC]\d{12,14})(?![\w/])"
+
+# The number of a car: county code, 2 or 3 digits, 3 letters ("B 123 ABC", "CJ-12-XYZ").
+_COUNTIES = (
+    "AB|AR|AG|BC|BH|BN|BR|BT|BV|BZ|CJ|CL|CS|CT|CV|DB|DJ|GJ|GL|GR|HD|HR|IF|IL|IS|MH|MM|MS|NT|OT|PH|SB|SJ|SM|SV|TL|TM|TR|VL|VN|VS|B"
+)
+CAR_PLATE = rf"(?<![\w-])((?:{_COUNTIES})[ -]?\d{{2,3}}[ -]?[A-Z]{{3}})(?![\w-])"
+
+# Land register and cadastre: "carte funciară nr. 123456", "nr. cadastral 234567-C1".
+LAND_REGISTER = (
+    r"\b(?:carte[ao]?\s+funciar[aă]|C\.?F\.?|n(?:umăr|r)\.?\s+cadastral[a]?|cadastral\s+n(?:umber|o)\.?|cadastral\s+number)"
+    r"\s*(?:nr\.?|no\.?|:)?\s*(\d{4,10}(?:-C\d+(?:-U\d+)?)?)(?!\d)"
+)
+# An insurance policy: "polița RCA nr. RO/25/K25/HX 1234567", "policy no. AB-1234567".
+POLICY_NUMBER = (
+    r"\b(?:poli[tț][aăei]|policy)\s+(?:de\s+asigurare\s+|[A-Za-z]{3,6}\s+)?(?:nr\.?|no\.?|number|seria)\s*:?\s*"
+    r"((?-i:(?=[A-Z0-9/ -]*\d)[A-Z0-9][A-Z0-9/-]*(?: ?[A-Z0-9/-]+){0,3}))(?![\w])"
+)
+
+# A place of a village address without a street: "sat Valea Seacă, com. Bucium, jud. Alba".
+_PLACE_WORD = r"(?:sat(?:ul)?|com(?:una)?\.?|jud(?:e[țt]ul)?\.?|mun(?:icipiul)?\.?|ora[sș]ul)"
+_PLACE_NAME = rf"{CAP}[\wăâîșțşţ-]*(?:\s+{CAP}[\wăâîșțşţ-]*)?"
+VILLAGE_ADDRESS = rf"\b({_PLACE_WORD}\s+{_PLACE_NAME}(?:\s*,\s*{_PLACE_WORD}\s+{_PLACE_NAME})+)"
 
 ID_CARD = (
     r"\b(?:seria|serie|series|CI|B\.?I\.?)\s+"
@@ -272,9 +302,14 @@ def build_pattern_recognizers(language: str) -> list[LocalRecognizer]:
         R("EMAIL_ADDRESS", EMAIL, language, score=0.95, name="Email"),
         R("RO_CNP", CNP, language, score_fn=_cnp_score, flags=exact, name="RoCnp"),
         R("RO_CNP", CNP_CONTEXT, language, group=1, score_fn=_cnp_context_score, name="RoCnpContext"),
+        R("RO_CNP", CNP_SPACED, language, group=1, score_fn=_cnp_context_score, name="RoCnpSpaced"),
         R("RO_CUI", CUI_CONTEXT, language, group=1, score_fn=_cui_context_score, name="RoCuiContext"),
         R("RO_CUI", CUI_WITH_PREFIX, language, group=1, score_fn=_cui_prefix_score, flags=exact, name="RoCuiPrefix"),
         R("RO_TRADE_REG", TRADE_REG, language, group=1, score=0.9, flags=exact, name="RoTradeReg"),
+        R("RO_TRADE_REG", TRADE_REG_NEW, language, group=1, score=0.9, flags=exact, name="RoTradeRegNew"),
+        R("ID_DOCUMENT", CAR_PLATE, language, group=1, score=0.8, flags=exact, name="CarPlate"),
+        R("ID_DOCUMENT", LAND_REGISTER, language, group=1, score=0.85, name="LandRegister"),
+        R("ID_DOCUMENT", POLICY_NUMBER, language, group=1, score=0.85, name="PolicyNumber"),
         R("ID_DOCUMENT", ID_CARD, language, group=1, score=0.9, name="IdCard"),
         R("ID_DOCUMENT", PASSPORT_RO, language, group=1, score=0.85, name="PassportRo"),
         R("ID_DOCUMENT", PASSPORT_EN, language, group=1, score=0.85, name="PassportEn"),
@@ -282,6 +317,7 @@ def build_pattern_recognizers(language: str) -> list[LocalRecognizer]:
         R("CASE_NUMBER", CASE_NUMBER_EN, language, group=1, score=0.85, name="CaseNumberEn"),
         R("ADDRESS", RO_ADDRESS, language, group=1, score=0.85, flags=exact, name="RoAddress"),
         R("ADDRESS", EN_ADDRESS, language, group=1, score=0.8, flags=exact, name="EnAddress"),
+        R("ADDRESS", VILLAGE_ADDRESS, language, group=1, score=0.8, flags=exact, name="VillageAddress"),
         R("ADDRESS", POSTAL_CODE, language, group=1, score=0.8, name="PostalCode"),
         R("ADDRESS", UK_POSTCODE, language, group=1, score=0.8, flags=exact, name="UkPostcode"),
         R("COMPANY_NUMBER", COMPANY_NUMBER, language, group=1, score=0.9, name="CompanyNumber"),

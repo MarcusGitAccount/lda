@@ -4,7 +4,7 @@ import stat
 import pytest
 
 from legal_anonymizer.engine import Engine
-from legal_anonymizer.vault import PLACEHOLDER_RE, Vault
+from legal_anonymizer.vault import PLACEHOLDER_RE, Vault, parse_placeholder
 
 
 def test_same_entity_gets_same_id_and_new_entity_gets_next_id(vault):
@@ -67,15 +67,15 @@ def test_vault_file_is_private(tmp_path):
 
 @pytest.mark.parametrize(
     "text",
-    ["[PERSON_001]", "[PERSON_1]", "[person_001]".upper(), "[ PERSON_001 ]", "[PERSON-001]", "[PERSON 001]", r"\[PERSON\_001\]"],
+    ["[PERSON_001]", "[PERSON_1]", "[person_001]", "[Person_001]", "[ PERSON_001 ]", "[PERSON-001]", "[PERSON 001]", r"\[PERSON\_001\]"],
 )
 def test_placeholder_regex_accepts_small_changes_by_an_ai_tool(text):
     match = PLACEHOLDER_RE.fullmatch(text)
-    assert match and match.group(1) == "PERSON" and int(match.group(2)) == 1
+    assert match and parse_placeholder(match) == ("PERSON", 1)
 
 
 def test_placeholder_regex_does_not_match_normal_text():
-    for text in ["[●]", "[Annex 1]", "[PERSON]", "[NOTE_1]", "PERSON_001"]:
+    for text in ["[●]", "[Annex 1]", "[PERSON]", "[NOTE_1]", "Person 1", "[Persoana 1]"]:
         assert not PLACEHOLDER_RE.search(text), text
 
 

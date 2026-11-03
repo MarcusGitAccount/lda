@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import io
 import re
+import unicodedata
 import zipfile
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from html import unescape
 from pathlib import PurePosixPath
@@ -31,6 +33,12 @@ class UnsupportedFormat(ValueError):
     pass
 
 
+def nfc(text: str) -> str:
+    """One written form for each letter. Text from macOS file names, some PDFs and copy-paste can have
+    "ș" as "s" and a combining mark. The sweep and the leak check compare letters, so we compose them."""
+    return unicodedata.normalize("NFC", text)
+
+
 class Document(Protocol):
     def units(self) -> list[str]: ...
 
@@ -49,7 +57,7 @@ def apply_replacements(text: str, replacements: list[Replacement]) -> str:
 class TextDocument:
     def __init__(self, data: bytes):
         try:
-            self.text = data.decode("utf-8-sig")
+            self.text = nfc(data.decode("utf-8-sig"))
         except UnicodeDecodeError as error:
             raise ValueError("The file is not UTF-8 text. Save it as UTF-8 and try again.") from error
 
@@ -77,14 +85,32 @@ TEXT_TAGS = (_w("t"), _w("delText"))
 INLINE_TAGS = {_w("tab"): "\t", _w("br"): "\n", _w("cr"): "\n", _w("noBreakHyphen"): "-"}
 
 PROCESSED_PARTS = re.compile(
-    r"^word/(document|footnotes|endnotes|comments\w*|header\d*|footer\d*)\.xml$"
+    r"^word/(?:glossary/)?(document|footnotes|endnotes|comments\w*|header\d*|footer\d*)\.xml$"
 )
+# Parts with strings that are not a paragraph: custom properties (a document system writes the client
+# and the matter there), custom XML, the targets of external links (`mailto:ion.popescu@alfa.ro`).
+SLOT_PARTS = re.compile(r"^(docProps/custom\.xml|customXml/item\d+\.xml|word/_rels/[\w.]+\.rels)$")
+# Attributes of a Word element that can hold a name: alt text, field codes, tooltips, content-control tags.
+SLOT_ATTRIBUTES = {
+    "docPr": {"descr", "title"}, "cNvPr": {"descr", "title"}, "fldSimple": {"instr"},
+    "hyperlink": {"tooltip"}, "alias": {"val"}, "tag": {"val"},
+}  # fmt: skip
+# The file of the people who wrote comments and tracked changes (name and e-mail).
+PEOPLE_PART = "word/people.xml"
 METADATA_FIELDS = {
     "docProps/core.xml": {"creator", "lastModifiedBy", "title", "subject", "description", "keywords", "category"},
     "docProps/app.xml": {"Company", "Manager"},
 }
 
 _PARSER = etree.XMLParser(resolve_entities=False, no_network=True, load_dtd=False, huge_tree=False)
+
+
+@dataclass
+class _Slot:
+    """A string of the file that is not a paragraph: an attribute, a field code, a property."""
+
+    text: str
+    write: Callable[[str], None]
 
 
 @dataclass
@@ -143,7 +169,7 @@ def _collect_units(root: etree._Element) -> list[_Unit]:
                 parts.append(" ")
                 pos += 1
             deleted = el.tag == _w("delText")
-            text = (el.text or "") if el.tag in TEXT_TAGS else INLINE_TAGS[el.tag]
+            text = nfc(el.text or "") if el.tag in TEXT_TAGS else INLINE_TAGS[el.tag]
             kind = "text" if el.tag in TEXT_TAGS else "inline"
             unit.nodes.append(_Node(el, pos, pos + len(text), kind))
             parts.append(text)
@@ -151,6 +177,38 @@ def _collect_units(root: etree._Element) -> list[_Unit]:
         unit.text = "".join(parts)
         units.append(unit)
     return units
+
+
+def _local(name: str) -> str:
+    return etree.QName(name).localname
+
+
+def _collect_slots(name: str, root: etree._Element) -> list[_Slot]:
+    slots = []
+
+    def add(el, attribute: str | None = None) -> None:
+        value = el.get(attribute) if attribute else el.text
+        if value and re.search(r"\w", value):
+            value = nfc(value)
+            slots.append(_Slot(value, (lambda v, el=el, a=attribute: el.set(a, v)) if attribute else (lambda v, el=el: setattr(el, "text", v))))
+
+    for el in root.iter():
+        if not isinstance(el.tag, str):
+            continue
+        local = _local(el.tag)
+        if PROCESSED_PARTS.match(name):
+            if local == "instrText":
+                add(el)
+            for attribute in SLOT_ATTRIBUTES.get(local, ()):
+                for key in el.attrib:
+                    if _local(key) == attribute:
+                        add(el, key)
+        elif name.endswith(".rels"):
+            if el.get("TargetMode") == "External":
+                add(el, "Target")
+        elif len(el) == 0:  # custom properties and custom XML: the text of each leaf element
+            add(el)
+    return slots
 
 
 def _open_zip(data: bytes) -> zipfile.ZipFile:
@@ -180,18 +238,28 @@ class DocxDocument:
         self._units: list[_Unit] = []
         for root in self._trees.values():
             self._units.extend(_collect_units(root))
+        # The strings outside the paragraphs follow the paragraphs in `units()`.
+        self._extra_trees = {
+            name: etree.fromstring(raw, _PARSER) for name, raw in sorted(self._raw.items()) if SLOT_PARTS.match(name)
+        }
+        self._slots: list[_Slot] = []
+        for name, root in {**self._trees, **self._extra_trees}.items():
+            self._slots.extend(_collect_slots(name, root))
 
     def units(self) -> list[str]:
-        return [u.text for u in self._units]
+        return [u.text for u in self._units] + [slot.text for slot in self._slots]
 
     def rewrite(self, replacements: list[list[Replacement]], *, scrub: bool = False) -> bytes:
         for unit, repls in zip(self._units, replacements):
             if repls:
                 unit.apply(sorted(repls))
+        for slot, repls in zip(self._slots, replacements[len(self._units) :]):
+            if repls:
+                slot.write(apply_replacements(slot.text, repls))
         out = dict(self._raw)
         if scrub:
             self._scrub(out)
-        for name, root in self._trees.items():
+        for name, root in {**self._trees, **self._extra_trees}.items():
             out[name] = etree.tostring(root, xml_declaration=True, encoding="UTF-8", standalone=True)
         buffer = io.BytesIO()
         with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zout:
@@ -207,6 +275,15 @@ class DocxDocument:
                     el.set(_w("author"), "Author")
                 if _w("initials") in el.attrib:
                     el.set(_w("initials"), "A")
+        if PEOPLE_PART in out:  # the names and e-mail addresses of the people who commented
+            tree = etree.fromstring(out[PEOPLE_PART], _PARSER)
+            for el in tree.iter():
+                for key in list(el.attrib):
+                    if _local(key) == "author":
+                        el.set(key, "Author")
+                    elif _local(key) in {"userId", "providerId"}:
+                        el.set(key, "None")
+            out[PEOPLE_PART] = etree.tostring(tree, xml_declaration=True, encoding="UTF-8", standalone=True)
         for name, fields in METADATA_FIELDS.items():
             if name in out:
                 tree = etree.fromstring(out[name], _PARSER)
@@ -224,29 +301,45 @@ class PdfDocument(TextDocument):
 
     def __init__(self, data: bytes):
         try:
-            self.text = pdf_text(data)
+            self.text = nfc(pdf_text(data))
         except PdfError as error:
             raise UnsupportedFormat(str(error)) from error
 
 
+_TAG = re.compile(r"<[^<>]+>")
+_ATTRIBUTE = re.compile(r'\s[\w:.-]+="([^"]*)"')
+
+
+def _attribute_values(raw: str) -> set[str]:
+    """The values of the attributes of an XML part, without the short codes ("1", "single")."""
+    return {
+        unescape(value)
+        for tag in _TAG.findall(raw)
+        for value in _ATTRIBUTE.findall(tag)
+        if re.search(r"[^\W\d_]{2}|\d{4}", value)
+    }
+
+
 def scan_text(name: str, data: bytes) -> str:
-    """All text of a file, also of the .docx parts that we do not change.
+    """All text of a file, also of the .docx parts that we do not change, and the values of attributes.
 
     The leak check uses it on the output file. Tags are removed without a space,
-    so a name that is split into runs is in one piece again.
+    so a name that is split into runs is in one piece again. The attribute values (alt text,
+    field codes, the names in `people.xml`) come in separate lines.
     """
     suffix = PurePosixPath(name).suffix.lower()
     if suffix == ".pdf" and data.startswith(b"%PDF-"):
         return PdfDocument(data).text
     if suffix != ".docx":
         return TextDocument(data).text
-    parts = []
+    parts, values = [], set()
     with _open_zip(data) as z:
         for info in z.infolist():
             if info.filename.endswith((".xml", ".rels")):
                 raw = z.read(info.filename).decode("utf-8", errors="ignore")
-                parts.append(raw if info.filename.endswith(".rels") else unescape(re.sub(r"<[^>]+>", "", raw)))
-    return "\n".join(parts)
+                parts.append(raw if info.filename.endswith(".rels") else unescape(_TAG.sub("", raw)))
+                values |= _attribute_values(raw)
+    return nfc("\n".join([*parts, *sorted(values)]))
 
 
 def open_document(name: str, data: bytes) -> Document:

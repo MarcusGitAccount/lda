@@ -29,6 +29,15 @@ _VOWELS = "aeiou"
 # Name types that change their form. A company name does not (the legal form follows it).
 INFLECTED_TYPES = {"PERSON", "LOCATION"}
 
+# Base names that look like the genitive of another name: `Andrei` is not `Andra` in the genitive.
+# A wrong join gives a wrong name in the restored text. A missed join only gives one more id.
+BASE_NAMES_LIKE_FORMS = {"andrei", "matei", "bartolomei"}
+
+
+def _ends_in_diphthong_u(word: str) -> bool:
+    """`Pau`, `Rau`, `Mateu`: a name that is no base for `Paul`, `Raul`. `Paul` is a name of its own."""
+    return word.endswith(("au", "eu", "ou"))
+
 
 @lru_cache(maxsize=8192)
 def inflections(word: str) -> frozenset[str]:
@@ -39,13 +48,17 @@ def inflections(word: str) -> frozenset[str]:
     forms: set[str] = set()
     last = w[-1]
     if last == "u":  # Popescu, Radu
-        forms |= {w + s for s in ("l", "lui", "le")}
-        if w.endswith("escu"):  # Popescu -> Popești, Popeștii, Popeștilor
+        forms |= {w + s for s in ("lui", "le")}
+        if not _ends_in_diphthong_u(w):
+            forms.add(w + "l")
+        if w.endswith("escu"):  # Popescu -> Popeștii, Popeștilor
+            # Not the bare `Popești`: it is also the name of a place (`Popești-Leordeni`, `Ionești`).
             plural = w[:-2] + "ti"
-            forms |= {plural, plural + "i", plural + "lor"}
+            forms |= {plural + "i", plural + "lor"}
     elif last == "a":  # Maria, Ioana, Timișoara, Cluj-Napoca
         stem = w[:-1]
-        forms.add(stem + "ei")
+        if stem + "ei" not in BASE_NAMES_LIKE_FORMS:
+            forms.add(stem + "ei")
         if stem.endswith(("c", "g")):
             forms.add(stem + "ii")
     elif last == "i":  # București, Iași, Mihai
@@ -72,10 +85,12 @@ def bases(word: str) -> frozenset[str]:
     if w.endswith("le"):
         found.add(w[:-2])  # Popescu-le
     if w.endswith("ul"):
-        found |= {w[:-2], w[:-1], w[:-2] + "i"}  # Ion-ul, Popescu-l, Iaș-ul
-    if w.endswith(("ei", "ii")):
+        found |= {w[:-2], w[:-2] + "i"}  # Ion-ul, Iaș-ul
+        if not _ends_in_diphthong_u(w[:-1]):
+            found.add(w[:-1])  # Popescu-l, but not Pau-l (`Paul` is a name)
+    if w.endswith(("ei", "ii")) and w not in BASE_NAMES_LIKE_FORMS:
         found.add(w[:-2] + "a")  # Mari-ei -> Maria, Napoc-ii -> Napoca
-    for suffix, cut in (("estilor", 5), ("estii", 3), ("esti", 2)):
+    for suffix, cut in (("estilor", 5), ("estii", 3)):
         if w.endswith(suffix):
             found.add(w[:-cut] + "cu")  # Popeștii -> Popescu
             break

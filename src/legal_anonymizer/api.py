@@ -129,6 +129,7 @@ def create_app(home: str | Path | None = None, detector: Detector | None = None)
                     "source": name,
                     "restored": dict(result.restored),
                     "unknown_ids": result.unknown,
+                    "suspect_ids": result.suspect,
                 })
         return {"matter": matter, "documents": documents}
 

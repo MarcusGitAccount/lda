@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .entities import TAGS, TYPE_BY_TAG
+from .entities import TAG_ALIAS_SPELLINGS, TAGS, TYPE_BY_TAG, type_of_tag
 from .romanian import INFLECTED_TYPES, derives_from, same_lexeme
 from .textnorm import collapse, entity_key, fold
 
@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS entity (
     type TEXT NOT NULL,
     number INTEGER NOT NULL,
     merged_into INTEGER REFERENCES entity(id),
+    ignored INTEGER NOT NULL DEFAULT 0,
     UNIQUE (type, number)
 );
 CREATE TABLE IF NOT EXISTS entity_key (
@@ -71,13 +72,26 @@ def placeholder(entity_type: str, number: int) -> str:
     return f"[{TAGS[entity_type]}_{number:0{_PLACEHOLDER_NUMBER_WIDTH}d}]"
 
 
-# The restore step accepts small changes that an AI tool can make: other
-# spacing, a hyphen in place of "_", missing leading zeros, and Markdown
-# escapes such as \[PERSON\_001\].
+# The restore step accepts small changes that an AI tool can make: other spacing, a hyphen in place
+# of "_", missing leading zeros, Markdown escapes such as \[PERSON\_001\], lower case, the long
+# name of the type, a Romanian word for the type (only with "_"), and other brackets. An id without
+# brackets needs the "_" ("PERSON_001"): the text "Person 1" is not an id.
+def _words(words) -> str:
+    return "|".join(sorted(map(re.escape, words), key=len, reverse=True))
+
+
+_EXACT, _ALIAS = _words(TYPE_BY_TAG), _words(TAG_ALIAS_SPELLINGS)
 PLACEHOLDER_RE = re.compile(
-    r"\\?\[\s*(" + "|".join(sorted(map(re.escape, TYPE_BY_TAG), key=len, reverse=True)) + r")"
-    r"\s*\\?[_\s-]\s*0*(\d+)\s*\\?\]"
+    rf"\\?\[\s*(?:({_EXACT})\s*\\?[_\s-]|({_ALIAS})\s*\\?_)\s*0*(\d+)\s*\\?\]"  # [PERSON_001], [ person 1 ]
+    rf"|(?<!\w)({_EXACT}|{_ALIAS})\\?_0*(\d+)(?!\d)",  # PERSON_001, (PERSON_001), [PERSON_001 si PERSON_002]
+    re.IGNORECASE,
 )
+
+
+def parse_placeholder(match: re.Match) -> tuple[str | None, int]:
+    """(entity type, number) of a match of `PLACEHOLDER_RE`. The type is None for an unknown tag."""
+    tag = match.group(1) or match.group(2) or match.group(4)
+    return type_of_tag(tag), int(match.group(3) or match.group(5))
 
 
 @dataclass
@@ -88,6 +102,7 @@ class Entity:
     canonical: str
     forms: dict[str, int] = field(default_factory=dict)
     documents: list[str] = field(default_factory=list)
+    ignored: bool = False  # `forget`: the tool does not hide this text any more
 
     @property
     def placeholder(self) -> str:
@@ -103,6 +118,8 @@ class Vault:
         self.db.row_factory = sqlite3.Row
         self.db.execute("PRAGMA foreign_keys = ON")
         self.db.executescript(SCHEMA)
+        if "ignored" not in {row["name"] for row in self.db.execute("PRAGMA table_info(entity)")}:
+            self.db.execute("ALTER TABLE entity ADD COLUMN ignored INTEGER NOT NULL DEFAULT 0")  # an older vault
         if new:
             os.chmod(self.path, 0o600)  # only the owner can read the real data
 
@@ -214,6 +231,50 @@ class Vault:
             self.db.execute("DELETE FROM mention WHERE entity_id = ?", (src.id,))
         return self.entity(dst.id)
 
+    def forget(self, entity_id: int) -> Entity:
+        """Say that this entity is not sensitive (a word that the model took for a name). The tool stops
+        hiding its forms. Old documents still restore: the id stays in the vault."""
+        entity = self.entity(entity_id)
+        with self.transaction():
+            self.db.execute("UPDATE entity SET ignored = 1 WHERE id = ?", (entity.id,))
+            self.add_kept(entity.forms)
+        return self.entity(entity.id)
+
+    def split(self, entity_id: int, surface: str) -> Entity:
+        """Take one written form (and the forms with the same key) out of an entity, into a new entity.
+        Use it when the tool joined two different names. Documents that are already hidden keep their
+        old id for this form."""
+        entity = self.entity(entity_id)
+        key = entity_key(entity.type, collapse(surface))
+        moving = [f for f in entity.forms if entity_key(entity.type, f) == key]
+        if not moving:
+            raise ValueError(f"'{surface}' is not a form of {entity.placeholder}.")
+        if len(moving) == len(entity.forms):
+            raise ValueError(f"'{surface}' is the only name of {entity.placeholder}. There is nothing to split.")
+        with self.transaction():
+            cur = self.db.execute(
+                "INSERT INTO entity (type, number) VALUES (?, ?)", (entity.type, self._next_number(entity.type))
+            )
+            new_id = cur.lastrowid
+            self.db.execute(
+                "INSERT OR REPLACE INTO entity_key (type, key, entity_id) VALUES (?, ?, ?)", (entity.type, key, new_id)
+            )
+            for form in moving:
+                self.db.execute(
+                    "UPDATE form SET entity_id = ? WHERE entity_id = ? AND original = ?", (new_id, entity.id, form)
+                )
+        return self.entity(new_id)
+
+    def any_ignored(self) -> bool:
+        return self.db.execute("SELECT 1 FROM entity WHERE ignored = 1 LIMIT 1").fetchone() is not None
+
+    def is_ignored(self, entity_type: str, surface: str) -> bool:
+        row = self.db.execute(
+            "SELECT e.ignored FROM entity_key k JOIN entity e ON e.id = k.entity_id WHERE k.type = ? AND k.key = ?",
+            (entity_type, entity_key(entity_type, surface)),
+        ).fetchone()
+        return bool(row and row["ignored"])
+
     def add_kept(self, phrases) -> None:
         """Remember text that the policy keeps visible (a court, a country). The leak check ignores it."""
         for phrase in phrases:
@@ -260,14 +321,16 @@ class Vault:
         return None
 
     def _canonical(self, entity_id: int) -> str:
-        # A seed name wins. Then the most common form. Then the first one seen.
+        # A seed name wins. Then a form with a capital letter ("Will", not "will"). Then the most common
+        # form. Then the first one seen.
         # A form that is only an inflection of another form ("Popescului") does not win over its base.
         rows = self.db.execute(
-            "SELECT original, folded FROM form WHERE entity_id = ? ORDER BY seed DESC, count DESC, rowid ASC",
+            "SELECT original, folded, seed FROM form WHERE entity_id = ? ORDER BY seed DESC, count DESC, rowid ASC",
             (entity_id,),
         ).fetchall()
         if not rows:
             return ""
+        rows.sort(key=lambda r: (-r["seed"], r["original"] == r["original"].lower()))  # a stable sort
         kind = self.db.execute("SELECT type FROM entity WHERE id = ?", (entity_id,)).fetchone()["type"]
         if kind in INFLECTED_TYPES and len(rows) > 1:
             ordered = kind != "PERSON"
@@ -295,14 +358,15 @@ class Vault:
                 (row["id"],),
             )
         ]
-        return Entity(row["id"], row["type"], row["number"], self._canonical(row["id"]), forms, docs)
+        return Entity(row["id"], row["type"], row["number"], self._canonical(row["id"]), forms, docs, bool(row["ignored"]))
 
     def by_placeholder(self, text: str) -> Entity | None:
         """Find an entity from text such as "[PERSON_001]" or "PERSON_001"."""
         match = PLACEHOLDER_RE.fullmatch(text.strip()) or PLACEHOLDER_RE.fullmatch(f"[{text.strip().strip('[]')}]")
         if not match:
             return None
-        return self.lookup(TYPE_BY_TAG[match.group(1)], int(match.group(2)))
+        entity_type, number = parse_placeholder(match)
+        return self.lookup(entity_type, number) if entity_type else None
 
     def lookup(self, entity_type: str, number: int) -> Entity | None:
         row = self.db.execute("SELECT id FROM entity WHERE type = ? AND number = ?", (entity_type, number)).fetchone()
@@ -316,7 +380,7 @@ class Vault:
         """Return (folded form, entity type, entity id) for the sweep."""
         rows = self.db.execute(
             "SELECT DISTINCT f.folded, e.type, e.id FROM form f JOIN entity e ON e.id = f.entity_id "
-            "WHERE e.merged_into IS NULL"
+            "WHERE e.merged_into IS NULL AND e.ignored = 0"
         ).fetchall()
         return [(r["folded"], r["type"], r["id"]) for r in rows if types is None or r["type"] in types]
 

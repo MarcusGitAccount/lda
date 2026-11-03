@@ -1,0 +1,161 @@
+{
+  "when": "2026-11-02T17:25:53+00:00",
+  "dataset": "synth-ro",
+  "name": "high-qwen3.5-4b+review-fixes",
+  "settings": {
+    "level": "high",
+    "min_score": 0.4,
+    "keep_public_bodies": false,
+    "ro_model": "dumitrescustefan/bert-base-romanian-ner",
+    "en_model": "dslim/bert-large-NER",
+    "gliner_model": "urchade/gliner_multi_pii-v1",
+    "gliner_threshold": 0.5,
+    "llm_model": "qwen3.5:4b"
+  },
+  "seconds": 32.0,
+  "metrics": {
+    "mentions": {
+      "tp": 211,
+      "fp": 0,
+      "fn": 5,
+      "precision": 1.0,
+      "recall": 0.9769,
+      "f1": 0.9883,
+      "f2": 0.9814
+    },
+    "entity_recall": 0.9404761904761905,
+    "documents": {
+      "total": 24,
+      "leaking": 5
+    },
+    "false_joins": 1,
+    "false_join_list": [
+      "M3:[ADDRESS_001]=['addr', 'loc_city']"
+    ],
+    "extra_ids": 18,
+    "over_hidden": {
+      "words": 0,
+      "of": 6
+    },
+    "restore": {
+      "exact": 6,
+      "same_apart_from_form": 12,
+      "documents": 24,
+      "ids_left_in_file": 0
+    },
+    "by_case": {
+      "address": {
+        "hidden": 6,
+        "total": 6,
+        "recall": 1.0
+      },
+      "allcaps": {
+        "hidden": 12,
+        "total": 12,
+        "recall": 1.0
+      },
+      "common_word_surname": {
+        "hidden": 3,
+        "total": 3,
+        "recall": 1.0
+      },
+      "diacritics": {
+        "hidden": 1,
+        "total": 1,
+        "recall": 1.0
+      },
+      "genitive": {
+        "hidden": 10,
+        "total": 10,
+        "recall": 1.0
+      },
+      "identifier": {
+        "hidden": 48,
+        "total": 48,
+        "recall": 1.0
+      },
+      "lowercase": {
+        "hidden": 8,
+        "total": 8,
+        "recall": 1.0
+      },
+      "lowercase_surname_alone": {
+        "hidden": 5,
+        "total": 10,
+        "recall": 0.5
+      },
+      "org_variant": {
+        "hidden": 18,
+        "total": 18,
+        "recall": 1.0
+      },
+      "place_like_form": {
+        "hidden": 6,
+        "total": 6,
+        "recall": 1.0
+      },
+      "plain": {
+        "hidden": 67,
+        "total": 67,
+        "recall": 1.0
+      },
+      "short_name": {
+        "hidden": 12,
+        "total": 12,
+        "recall": 1.0
+      },
+      "surname_alone": {
+        "hidden": 10,
+        "total": 10,
+        "recall": 1.0
+      },
+      "surname_alone_sentence_start": {
+        "hidden": 5,
+        "total": 5,
+        "recall": 1.0
+      }
+    },
+    "missed": [
+      [
+        "lowercase_surname_alone",
+        "pa",
+        "popescu"
+      ],
+      [
+        "lowercase_surname_alone",
+        "pa",
+        "lupu"
+      ],
+      [
+        "lowercase_surname_alone",
+        "pa",
+        "rusu"
+      ],
+      [
+        "lowercase_surname_alone",
+        "pa",
+        "lungu"
+      ],
+      [
+        "lowercase_surname_alone",
+        "pa",
+        "albu"
+      ]
+    ]
+  },
+  "environment": {
+    "commit": "4e34411",
+    "dirty": true,
+    "code_hash": "df04d7d6a707",
+    "python": "3.13.5",
+    "machine": "Darwin arm64",
+    "packages": {
+      "presidio-analyzer": "2.2.366",
+      "transformers": "4.57.6",
+      "torch": "2.15.0",
+      "gliner": "0.2.30",
+      "legal-anonymizer": "0.1.0"
+    }
+  },
+  "seed": 7
+}

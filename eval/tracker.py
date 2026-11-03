@@ -7,6 +7,7 @@ The notes that explain the results are in docs/experiments.md.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import platform
 import subprocess
@@ -27,6 +28,15 @@ def _git(*args: str) -> str:
         return ""
 
 
+def code_hash() -> str:
+    """A short hash of the code that makes the result: `src/` and `eval/*.py`. It names the exact code
+    also when the work is not committed (the `commit` field names only the last commit)."""
+    digest = hashlib.sha256()
+    for path in sorted([*(ROOT / "src").rglob("*.py"), *(ROOT / "eval").glob("*.py")]):
+        digest.update(path.relative_to(ROOT).as_posix().encode() + b"\0" + path.read_bytes() + b"\0")
+    return digest.hexdigest()[:12]
+
+
 def environment() -> dict:
     versions = {}
     for name in PACKAGES:
@@ -36,7 +46,9 @@ def environment() -> dict:
             versions[name] = None
     return {
         "commit": _git("rev-parse", "--short", "HEAD") or None,
-        "dirty": bool(_git("status", "--porcelain")),
+        # Only the code counts. The result files and the docs are always new, so "git status" is never clean.
+        "dirty": bool(_git("status", "--porcelain", "--", "src", ":(glob)eval/*.py")),
+        "code_hash": code_hash(),
         "python": platform.python_version(),
         "machine": f"{platform.system()} {platform.machine()}",
         "packages": versions,

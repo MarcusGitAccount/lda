@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import re
 from bisect import bisect_right
 from collections import Counter
@@ -11,12 +12,17 @@ from itertools import permutations
 
 from .config import Settings
 from .detector import Detector
-from .documents import Document, Replacement, open_document, scan_text
-from .entities import TYPE_BY_TAG
-from .romanian import INFLECTED_TYPES, inflections, same_lexeme
-from .spans import Span, resolve_overlaps
+from .documents import (
+    Document,
+    Replacement,
+    apply_replacements,
+    open_document,
+    scan_text,
+)
+from .romanian import INFLECTED_TYPES, inflections, related, same_lexeme
+from .spans import NAME_TYPES, Span, resolve_overlaps
 from .textnorm import LEGAL_FORMS, collapse, entity_key, fold
-from .vault import PLACEHOLDER_RE, Vault
+from .vault import PLACEHOLDER_RE, Vault, parse_placeholder
 
 MIN_SWEEP_LENGTH = 3
 MAX_NAME_ORDERS = 4  # a name of up to 4 words has up to 24 orders
@@ -76,6 +82,39 @@ class KnownForms:
     def finditer(self, text: str):
         return self.regex.finditer(text) if self.regex else iter(())
 
+    def matches(
+        self, text: str, reference: str | None = None, folded: str | None = None, source: str | None = None
+    ):
+        """The (start, end, owner) of each known form in `text`.
+
+        A name has a capital letter. A lowercase word that is a form of a known one-word name
+        ("brown" for "Brown") is a common word if the text also writes the name with a capital
+        letter: "Mr Brown ... the brown car". If no capital letter writes it, the word is hidden:
+        the text can be all lower case. `reference` is the text before the change, when `text` is
+        the hidden file that has lost the capital letters. `folded` is `fold(text)` if the caller
+        has changed it (it must keep the length). `source` is the document before the change. A document
+        with no capital letter at all (a quick message) has no such common words: all its forms are hidden.
+        """
+        folded = fold(text) if folded is None else folded
+        lowercase_document = not any(ch.isupper() for ch in (text if source is None else source))
+        capitals = None
+        for match in self.finditer(folded):
+            owner = self.owner(match.group(0))
+            if owner is None:
+                continue
+            written = text[match.start() : match.end()]
+            if (
+                owner[0] in NAME_TYPES
+                and not lowercase_document
+                and written == written.lower()
+                and not re.search(r"[\s-]", written)
+            ):
+                if capitals is None:
+                    capitals = _capitalized_words(text if reference is None else reference)
+                if related(match.group(0)) & capitals:
+                    continue
+            yield match.start(), match.end(), owner
+
     def owner(self, matched: str) -> tuple[str, int] | None:
         matched = collapse(matched)
         if matched in self.owners:
@@ -104,6 +143,10 @@ class KnownForms:
         )
 
 
+def _capitalized_words(text: str) -> set[str]:
+    return {fold(word) for word in re.findall(r"\w+", text) if word[:1].isupper()}
+
+
 @dataclass
 class AnonymizeResult:
     data: bytes
@@ -121,6 +164,8 @@ class RestoreResult:
     data: bytes
     restored: Counter = field(default_factory=Counter)
     unknown: list[str] = field(default_factory=list)
+    # Text that looks like an id and is still in the file: a changed tag, or letters glued to an id.
+    suspect: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -173,9 +218,11 @@ class Engine:
         with self.vault.transaction():
             for item in prepared:
                 self.vault.add_kept(item.text[s.start : s.end] for s in item.spans if s.type == "KEEP")
-                for span in resolve_overlaps(item.spans + self._sweep(item.text), item.text):
+                for span in self._visible(
+                    resolve_overlaps(item.spans + self._sweep(item.text, context), item.text), item.text
+                ):
                     self.vault.resolve(span.type, collapse(item.text[span.start : span.end]), count=0)
-        return [self._render(item) for item in prepared]
+        return [self._render(item, context) for item in prepared]
 
     def _open(self, name: str, data: bytes, language: str | None) -> _Prepared:
         document = open_document(name, data)
@@ -183,9 +230,9 @@ class Engine:
         text = "\n".join(units)
         return _Prepared(name, data, document, units, text, self.detector.language_of(text, language), [])
 
-    def _render(self, item: _Prepared) -> AnonymizeResult:
+    def _render(self, item: _Prepared, context: str) -> AnonymizeResult:
         text, units = item.text, item.units
-        spans = resolve_overlaps(item.spans + self._sweep(text), text)
+        spans = self._visible(resolve_overlaps(item.spans + self._sweep(text, context), text), text)
 
         # Give one id to each written form, in the order of first appearance.
         written = Counter((span.type, collapse(text[span.start : span.end])) for span in spans)
@@ -210,7 +257,13 @@ class Engine:
             output = item.document.rewrite(replacements, scrub=True)
             self.vault.record_document(item.name, hashlib.sha256(item.data).hexdigest(), item.language, dict(mentions))
 
-        return AnonymizeResult(output, item.language, counts, self.find_leaks(item.name, output), spans)
+        return AnonymizeResult(output, item.language, counts, self.find_leaks(item.name, output, reference=context, source=text), spans)
+
+    def _visible(self, spans: list[Span], text: str) -> list[Span]:
+        """Remove the spans of entities that the user told us to forget (`lda forget`)."""
+        if not self.vault.any_ignored():
+            return spans
+        return [s for s in spans if not self.vault.is_ignored(s.type, collapse(text[s.start : s.end]))]
 
     def _known_forms(self) -> KnownForms:
         """All known written forms in one regex, with the owner of each form."""
@@ -229,31 +282,30 @@ class Engine:
                     owners.setdefault(variant, (entity_type, entity_id))
         return KnownForms(owners)
 
-    def _sweep(self, text: str) -> list[Span]:
-        """Find known entities again. The models can miss a name that they found before."""
+    def _sweep(self, text: str, reference: str | None = None) -> list[Span]:
+        """Find known entities again. The models can miss a name that they found before.
+        `reference` is the text of all documents of the batch: it shows which words are written with a capital letter."""
         known = self._known_forms()
-        spans = []
-        for match in known.finditer(fold(text)):  # `fold` keeps the length of the text
-            owner = known.owner(match.group(0))
-            if owner:
-                spans.append(Span(match.start(), match.end(), owner[0], 1.0, "vault"))
-        return spans
+        return [Span(start, end, owner[0], 1.0, "vault") for start, end, owner in known.matches(text, reference)]
 
     # --- check ----------------------------------------------------------------------
 
-    def find_leaks(self, name: str, data: bytes) -> list[str]:
-        """Look in a file for text of a known entity. Return the placeholders of what is found."""
+    def find_leaks(
+        self, name: str, data: bytes, reference: str | None = None, source: str | None = None
+    ) -> list[str]:
+        """Look in a file for text of a known entity. Return the placeholders of what is found.
+
+        `reference` is the text of the batch before the change, and `source` the text of this document.
+        The hidden file has no capital letters of the names, and the check needs them (see `KnownForms.matches`).
+        """
         known = self._known_forms()
-        text = fold(scan_text(name, data))
+        text = scan_text(name, data)
+        folded = fold(text)
         kept = self.vault.kept_phrases()
         if kept:  # text that the policy keeps visible is not a leak
             body = "|".join(re.escape(p).replace(r"\ ", r"\s+") for p in sorted(kept, key=len, reverse=True))
-            text = re.sub(rf"(?<!\w)(?:{body})(?!\w)", " ", text)
-        leaks = set()
-        for match in known.finditer(text):
-            owner = known.owner(match.group(0))
-            if owner:
-                leaks.add(self.vault.entity(owner[1]).placeholder)
+            folded = re.sub(rf"(?<!\w)(?:{body})(?!\w)", lambda m: " " * len(m.group(0)), folded)
+        leaks = {self.vault.entity(owner[1]).placeholder for _, _, owner in known.matches(text, reference, folded, source)}
         return sorted(leaks)
 
     # --- restore ---------------------------------------------------------------------
@@ -263,15 +315,55 @@ class Engine:
         units = document.units()
         restored: Counter = Counter()
         unknown: list[str] = []
+        suspect: set[str] = set()
         replacements: list[list[Replacement]] = []
         for unit in units:
             found = []
             for match in PLACEHOLDER_RE.finditer(unit):
-                entity = self.vault.lookup(TYPE_BY_TAG[match.group(1)], int(match.group(2)))
+                entity_type, number = parse_placeholder(match)
+                entity = self.vault.lookup(entity_type, number) if entity_type else None
                 if entity is None:
                     unknown.append(match.group(0))
                     continue
-                found.append((match.start(), match.end(), entity.canonical))
+                end, text = match.end(), entity.canonical
+                glue = _GLUED.match(unit, end)
+                if glue:  # "[PERSON_001]ului": the AI tool wrote a Romanian ending after the id
+                    form = glued_form(text, glue.group(1)) if entity.type in INFLECTED_TYPES else None
+                    if form is None:
+                        suspect.add(unit[match.start() : glue.end()])
+                    else:
+                        end, text = glue.end(), form
+                found.append((match.start(), end, text))
                 restored[entity.placeholder] += 1
             replacements.append(found)
-        return RestoreResult(document.rewrite(replacements), restored, sorted(set(unknown)))
+            for look in _SUSPECT.finditer(apply_replacements(unit, found)):
+                if look.group(0) not in unknown:
+                    suspect.add(look.group(0))
+        return RestoreResult(document.rewrite(replacements), restored, sorted(set(unknown)), sorted(suspect))
+
+
+# Letters that follow an id without a space ("[PERSON_001]ului", "[PERSON_001]-ului").
+_GLUED = re.compile(r"-?([a-zăâîșț]+)")
+# Text that looks like an id but is not one that we restore: "[PERSONNE_001]", "ORG_7", "[ORGANIZATIE 3]".
+_SUSPECT = re.compile(
+    r"(?<!\w)[^\W\d_]{3,}[_＿]\d{1,6}(?!\d)"
+    r"|\[\s*[A-ZĂÂÎȘȚ]{4,}[\s_-]\s*\d{1,6}\s*\]"
+    r"|[［\[]\s*[^\W\d_]{3,}[_＿]\s*\d{1,6}\s*[］\]]"
+)
+
+
+def glued_form(canonical: str, ending: str) -> str | None:
+    """The canonical name with its last word in the form that has this ending, or None.
+
+    `Popescu` and `ului` give `Popescului`. `Maria` and `ei` give `Mariei`.
+    """
+    words = canonical.split()
+    if not words:
+        return None
+    last = words[-1]
+    base, ending = fold(last), fold(ending)
+    forms = sorted((f for f in inflections(base) if f.endswith(ending)), key=len)
+    if not forms:
+        return None
+    keep = len(os.path.commonprefix([base, forms[0]]))
+    return " ".join([*words[:-1], last[:keep] + forms[0][keep:]])

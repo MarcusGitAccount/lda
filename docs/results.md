@@ -15,6 +15,8 @@ Made by `python -m eval.report` from `eval/results/`. Do not edit.
 | 2026-11-02 00:39 | high-qwen3.5-0.8b | high | kept | 99.6% | 0.75 | 0.86 | 0.94 | n/a | n/a | 0 | 98.5% | 92.6 |
 | 2026-11-02 01:12 | low+forms | low | kept | 99.2% | 0.79 | 0.88 | 0.94 | n/a | n/a | 0 | 98.6% | 478.1 |
 | 2026-11-02 01:24 | medium+forms | medium | kept | 99.6% | 0.77 | 0.87 | 0.94 | n/a | n/a | 0 | 98.5% | 148.7 |
+| 2026-11-02 14:52 | low+review-fixes | low | kept | 99.2% | 0.79 | 0.88 | 0.94 | n/a | n/a | 0 | 98.6% | 455.9 |
+| 2026-11-02 15:01 | medium+review-fixes | medium | kept | 99.6% | 0.77 | 0.87 | 0.94 | n/a | n/a | 0 | 98.5% | 140.2 |
 
 ## corpus-tab-en
 
@@ -35,6 +37,8 @@ Made by `python -m eval.report` from `eval/results/`. Do not edit.
 | 2026-11-02 00:56 | high-qwen3.5-9b | high | hidden | 86.3% | 0.52 | 0.65 | 0.76 | 42/171 | 9 | 29 | 99.9% | 38.5 |
 | 2026-11-02 01:12 | low+forms | low | hidden | 80.3% | 0.56 | 0.66 | 0.74 | 37/152 | 7 | 32 | 99.9% | 311.0 |
 | 2026-11-02 01:23 | medium+forms | medium | hidden | 86.3% | 0.55 | 0.67 | 0.77 | 41/171 | 8 | 29 | 99.9% | 143.0 |
+| 2026-11-02 14:52 | low+review-fixes | low | hidden | 80.3% | 0.56 | 0.66 | 0.74 | 37/152 | 7 | 32 | 99.9% | 301.4 |
+| 2026-11-02 15:00 | medium+review-fixes | medium | hidden | 86.3% | 0.55 | 0.67 | 0.77 | 41/171 | 8 | 29 | 99.9% | 146.3 |
 
 ## hits-ro-law
 
@@ -61,6 +65,8 @@ Made by `python -m eval.report` from `eval/results/`. Do not edit.
 | 2026-11-02 01:02 | high-qwen3.5-2b | high | hidden | 93.3% | 94.7% | 93.2% | 85.7% | 0.26 | 0.41 | 0.62 | 88.3 | 0 / 183 |
 | 2026-11-02 01:10 | low+forms | low | hidden | 81.6% | 91.6% | 74.9% | 81.0% | 0.35 | 0.49 | 0.65 | 364.7 | - |
 | 2026-11-02 01:18 | medium+forms | medium | hidden | 93.3% | 94.7% | 93.2% | 85.7% | 0.31 | 0.46 | 0.66 | 171.1 | - |
+| 2026-11-02 14:50 | low+review-fixes | low | hidden | 81.6% | 91.6% | 74.9% | 81.0% | 0.35 | 0.49 | 0.65 | 364.5 | - |
+| 2026-11-02 14:55 | medium+review-fixes | medium | hidden | 93.3% | 94.7% | 93.2% | 85.7% | 0.31 | 0.46 | 0.66 | 183.6 | - |
 
 ## mapa-ro-test+validation
 
@@ -78,3 +84,13 @@ Made by `python -m eval.report` from `eval/results/`. Do not edit.
 | 2026-11-02 01:06 | high-qwen3.5-2b | high | hidden | 94.2% | 97.5% | 91.5% | 100.0% | 0.14 | 0.24 | 0.44 | 99.4 | 0 / 368 |
 | 2026-11-02 01:21 | medium+forms | medium | hidden | 94.1% | 97.5% | 91.5% | 100.0% | 0.19 | 0.31 | 0.52 | 220.4 | - |
 | 2026-11-02 01:30 | low+forms | low | hidden | 93.2% | 96.2% | 90.7% | 100.0% | 0.22 | 0.36 | 0.57 | 903.9 | - |
+| 2026-11-02 14:51 | low+review-fixes | low | hidden | 93.2% | 96.2% | 90.7% | 100.0% | 0.22 | 0.36 | 0.57 | 877.1 | - |
+| 2026-11-02 14:57 | medium+review-fixes | medium | hidden | 94.1% | 97.5% | 91.5% | 100.0% | 0.19 | 0.31 | 0.52 | 237.2 | - |
+
+## synth-ro
+
+| when | name | level | mention recall | entity recall | documents with a leak | false joins | extra ids | over-hidden | restore exact | ids left in file | code |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| 2026-11-02 17:24 | low+review-fixes | low | 97.7% | 94.0% | 5/24 | 0 | 17 | 0/6 | 6/24 | 0 | df04d7d6a707 |
+| 2026-11-02 17:24 | medium+review-fixes | medium | 97.7% | 94.0% | 5/24 | 1 | 18 | 0/6 | 6/24 | 0 | df04d7d6a707 |
+| 2026-11-02 17:25 | high-qwen3.5-4b+review-fixes | high | 97.7% | 94.0% | 5/24 | 1 | 18 | 0/6 | 6/24 | 0 | df04d7d6a707 |

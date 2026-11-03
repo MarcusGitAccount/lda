@@ -1,0 +1,72 @@
+{
+  "when": "2026-11-02T14:51:09+00:00",
+  "dataset": "mapa-ro-test+validation",
+  "name": "low+review-fixes",
+  "settings": {
+    "level": "low",
+    "min_score": 0.4,
+    "keep_public_bodies": false,
+    "ro_model": "dumitrescustefan/bert-base-romanian-ner",
+    "en_model": "dslim/bert-large-NER",
+    "gliner_model": null,
+    "gliner_threshold": null,
+    "llm_model": null
+  },
+  "seconds": 30.0,
+  "metrics": {
+    "documents": 3,
+    "tokens": 26277,
+    "recall_any_type": 0.9324,
+    "classes": {
+      "PERSON": {
+        "gold": 79,
+        "covered": 76,
+        "recall": 0.962,
+        "right_type_recall": 0.8228
+      },
+      "ORGANISATION": {
+        "gold": 129,
+        "covered": 117,
+        "recall": 0.907,
+        "right_type_recall": 0.7752
+      },
+      "ADDRESS": {
+        "gold": 14,
+        "covered": 14,
+        "recall": 1.0,
+        "right_type_recall": 1.0
+      }
+    },
+    "hidden_or_not": {
+      "tp": 207,
+      "fp": 719,
+      "fn": 15,
+      "precision": 0.2235,
+      "recall": 0.9324,
+      "f1": 0.3606,
+      "f2": 0.5706
+    },
+    "predicted_tokens": {
+      "PERSON": 126,
+      "ORGANIZATION": 780,
+      "LOCATION": 20,
+      "URL": 1,
+      "ADDRESS": 0
+    },
+    "tokens_per_second": 877.1
+  },
+  "environment": {
+    "commit": "4e34411",
+    "dirty": true,
+    "code_hash": "9486ad12eaac",
+    "python": "3.13.5",
+    "machine": "Darwin arm64",
+    "packages": {
+      "presidio-analyzer": "2.2.366",
+      "transformers": "4.57.6",
+      "torch": "2.15.0",
+      "gliner": "0.2.30",
+      "legal-anonymizer": "0.1.0"
+    }
+  }
+}

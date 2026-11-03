@@ -85,7 +85,31 @@ def row_hits(run: dict) -> tuple[list[str], list[str]]:
     return head, cells
 
 
+def row_synth(run: dict) -> tuple[list[str], list[str]]:
+    m = run["metrics"]
+    head = ["when", "name", "level", "mention recall", "entity recall", "documents with a leak", "false joins", "extra ids",
+            "over-hidden", "restore exact", "ids left in file", "code"]  # fmt: skip
+    r = m["restore"]
+    cells = [
+        run["when"][:16].replace("T", " "),
+        run["name"],
+        run["settings"]["level"],
+        f"{m['mentions']['recall']:.1%}",
+        f"{m['entity_recall']:.1%}",
+        f"{m['documents']['leaking']}/{m['documents']['total']}",
+        str(m["false_joins"]),
+        str(m["extra_ids"]),
+        f"{m['over_hidden']['words']}/{m['over_hidden']['of']}",
+        f"{r['exact']}/{r['documents']}",
+        str(r["ids_left_in_file"]),
+        run["environment"].get("code_hash") or "",
+    ]
+    return head, cells
+
+
 def row_for(dataset: str):
+    if dataset == "synth-ro":
+        return row_synth
     if dataset.startswith("corpus-"):
         return row_corpus
     return row_hits if dataset.startswith("hits-") else row_mapa

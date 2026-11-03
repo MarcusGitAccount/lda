@@ -27,6 +27,25 @@ TAGS = {
 }
 TYPE_BY_TAG = {tag: entity for entity, tag in TAGS.items()}
 
+# Other words that an AI tool can write in place of a tag (the long type name, or a Romanian word).
+# The restore step reads them as the tag, but only with "_" and a number. The keys have no accents and
+# no lower case. A common word ("name", "data", "company") is not in the list: a document can use it.
+TAG_ALIASES = {
+    "ORGANIZATION": "ORG", "ORGANIZATIE": "ORG", "ORGANISATION": "ORG",
+    "PERSOANA": "PERSON", "PERSONA": "PERSON",
+    "LOCATIE": "LOCATION", "LOCALITATE": "LOCATION",
+    "ADRESA": "ADDRESS", "TELEFON": "PHONE", "TELEPHONE": "PHONE", "FUNCTIE": "JOB",
+    "EMAIL_ADDRESS": "EMAIL", "IBAN_CODE": "IBAN", "PHONE_NUMBER": "PHONE", "CREDIT_CARD": "CARD",
+}  # fmt: skip
+# The same words with the Romanian letters, for the pattern of the restore step.
+TAG_ALIAS_SPELLINGS = [*TAG_ALIASES, "PERSOANĂ", "ORGANIZAȚIE", "LOCAȚIE", "ADRESĂ", "FUNCȚIE"]
+
+
+def type_of_tag(word: str) -> str | None:
+    """The entity type for a tag as the text writes it: `ORG`, `org`, `Organization`, `ORGANIZAȚIE`."""
+    folded = word.upper().translate(str.maketrans("ĂÂÎȘȚŞŢ", "AAISTST"))
+    return TYPE_BY_TAG.get(folded) or TYPE_BY_TAG.get(TAG_ALIASES.get(folded, ""))
+
 # These types come from patterns, often with a checksum. They win over NER.
 STRUCTURED = {
     "EMAIL_ADDRESS", "PHONE_NUMBER", "IBAN_CODE", "CREDIT_CARD", "URL",

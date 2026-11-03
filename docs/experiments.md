@@ -27,6 +27,7 @@ The raw numbers are in `eval/results/` (one JSON file for each run) and in `docs
 | `corpus-demo` | Romanian, English | 5 PDFs, 6,490 words, 57 gold entities | Made-up contracts and letters for the demo | Written by us, so the tool is tuned on it. Do not trust its numbers. |
 | `corpus-tab-en` | English | 12 ECHR cases, 20,463 words, 468 gold mentions | Real court cases with person, place, organization and case-number labels (TAB, MIT license). `python -m eval.tab_corpus` | Court judgments, not contracts. TAB also masks things that the tool does not hide by default (dates, quantities), so we leave them out. |
 | `ro-law` | Romanian | 40 acts, 70,698 words | Real Romanian legal acts (8 types x 5) from legislatie.just.ro, through the export of `scriptogre/romanian-law-data`. `python -m eval.ro_law_corpus` | **No gold list**: we measure hits and read them, we cannot measure recall. Legislation, not contracts. The data is not in git. |
+| `synth-ro` | Romanian | 24 made-up documents (6 matters x 4), 216 gold mentions, 6 words that must stay visible | Contracts, notices, filings and messages with the gold list made by construction (`eval/synth_ro.py`, `python -m eval.synth_eval`). 14 hard-case classes that the public sets lack. No seed list. | Made by the same author as the tool: the classes come from the review of 2026-11-02, so it is a regression set, not a measure of real contracts. 24 documents only; the frozen dev/holdout split is not made yet (LDA-46). |
 | `agent-test` | Romanian, English | 3 Word files | A real AI tool (a subagent) edits hidden Word files. `docs/agent-test/` | One agent, one run, one prompt with the rules. |
 | `corpus-private` | Romanian | **does not exist yet** | 10 to 15 real documents of the lawyer | This is the missing piece. See "What we do not know". |
 
@@ -244,6 +245,38 @@ The hits that we read are what we expect: dates such as `19 iulie 2016` and `10-
 *Decision:* keep both types off by default. A hidden date stops an AI tool from working out a deadline, and a hidden title hides the role of a person (`șef` is a title but also a part of a role). The lawyer chooses by case.
 *Not measured:* whether hiding them lowers the chance that a strong model guesses who the parties are (LDA-23).
 
+### EXP-012: the code after the adversarial review (R-01 to R-12), same sets and levels as EXP-010
+
+*Question:* Did the fixes of the review (LDA-32 to LDA-41) change the recall on the public sets?
+*Setup:* the same four sets, level `low` and `medium`, runs named `low+review-fixes` and `medium+review-fixes`. The new common-word rule, the case-aware sweep, the NFC text, the new patterns, and the restore changes are all in.
+*Result:* the numbers are the same as before. `low`: MAPA-EN 81.6 %, MAPA-RO 93.2 %, TAB 80.3 %, demo 99.2 %. `medium`: 93.3 %, 94.1 %, 86.3 %, 99.6 %.
+*Decision:* no regression. We also expected no gain: these sets do not have common-word surnames, hidden `.docx` parts, Romanian forms in context, or the new identifiers. The failures of the review were real, but the public sets could not see them (R-06). That is why EXP-013 exists.
+
+### EXP-013: synthetic Romanian set with gold by construction (LDA-46)
+
+*Question:* How many of the failures that the review found does the tool have, and do the fixes remove them?
+*Setup:* 24 made-up documents (`eval/synth_ro.py`, seed 7), whole pipeline, no seed list (`python -m eval.synth_eval`). The "before" run used the code of commit `4e34411` (a copy of the project, not recorded in `eval/results/`).
+*Result, level `low`:*
+
+| | before the fixes (4e34411) | after the fixes |
+|---|---|---|
+| mention recall | 84.7 % (183 of 216) | **97.7 %** (211 of 216) |
+| entity recall (every mention hidden) | 81.0 % | **94.0 %** |
+| documents with a visible mention | 21 of 24 | **5 of 24** |
+| false joins | 1 (Andrei and Andra, one id) | **0** |
+| words that must stay visible but were hidden | 0 of 6 | 0 of 6 |
+| surname alone, after a title | 0 of 10 | 10 of 10 |
+| surname alone at the start of a sentence | 0 of 5 | 5 of 5 |
+| identifiers (CNP in groups, plate, new ONRC number, ...) | 42 of 48 | 48 of 48 |
+| genitive forms | 8 of 10 | 10 of 10 |
+| lowercase surname alone | 0 of 10 | **5 of 10** |
+| restored text exactly as the original | 5 of 24 | 6 of 24 |
+
+Level `medium` and level `high` (Qwen3.5 4b, 32 s against 9 s for the 24 documents) give the same numbers as `low` on this set: GLiNER and the LLM add nothing here.
+*What is left:* the 5 missed mentions are all a lowercase surname alone that the vault knows only inside a full name (`popescu` after `Ion Popescu`): LDA-42. One gold entity often has several ids (17 cases: full name, surname alone, short name of a company): LDA-42. Only 6 of 24 documents come back exactly (the genitive and ALL-CAPS forms come back in the base form): LDA-21. At level `medium`, one false join is reported (a street address and a city, in one matter): not studied yet.
+*Two mistakes in the first version of the set, found by the first run, and fixed:* a county with the same name as a city counted as a "false join", and two people with one surname (the pair Andrei and Andra Ionescu) made a surname alone ambiguous. Now the gold writes such mentions in full. Also, a rule that I added (skip a lowercase one-word form when the batch has a capital letter form) hid nothing in a message with no capital letter at all, and the first run showed it: a document with no capital letter now gets all its forms hidden (`KnownForms.matches`, `source`).
+*Decision:* the review fixes work on the classes that they target. The set is a regression set (LDA-26 will use it). Level `high` is still not recommended: no gain on the public sets (EXP-006) and none here. The next version needs a frozen hard-case list, a dev/holdout split, and documents that a person wrote (LDA-46).
+
 ## Mistakes in the measurement itself (so that we do not repeat them)
 
 - **Titles in the gold list.** TAB writes `Mr Abdisamad Adow Sufi`. The tool keeps `Mr` visible on purpose. The first
@@ -264,6 +297,9 @@ The hits that we read are what we expect: dates such as `19 iulie 2016` and `10-
   The recall numbers are not affected. Measure the speed again on a quiet computer.
 - **An evaluation that did not follow the policy.** After the keep list got the Romanian forms of the countries, MAPA Romanian lost one token, because the
   evaluation still counted `României` as a token to hide. The evaluation must use the same keep list as the detector (`eval/mapa_eval.py` does now).
+- **Public sets that cannot see the failure.** The adversarial review found leaks (a surname that is a common word, hidden `.docx` parts, restore of changed ids, false joins of Romanian forms) that none of MAPA, TAB or the demo contains. The numbers on them stayed the same before and after the fixes (EXP-012). A fix needs a test set that has the failure: `synth-ro` (EXP-013) and `tests/test_review_findings.py`.
+- **Headline numbers without their scope.** MAPA numbers are for the detector only (no sweep, no vault), per token, on 3 documents. The demo run is seeded with the 8 entities of `matter.yaml`. TAB leaves out the quasi-identifiers. The README now says so next to the numbers.
+- **A test that checks the wrong string.** The restore test used `"[person_001]".upper()`, so the lowercase case in the README was never tested. Every test of a tolerance must use the exact variant that the document promises.
 Each of these made the tool look worse or better than it is. The measurement code needs tests like the code it measures (`tests/test_eval_tools.py`).
 
 ## What we do not know
@@ -276,12 +312,15 @@ Each of these made the tool look worse or better than it is. The measurement cod
 3. **What a real AI tool does to the ids, in general.** One subagent (one model, a prompt with the rules for ids) kept all 110 ids (EXP-008). We do not know what happens with
    a plain prompt, or with Claude Code, Codex or Copilot.
 4. **How fast it is on the lawyer's computer.** All times here are from one Apple M1 Pro with 16 GB. A laptop with 8 GB is not tested.
-5. **Whether the LLM checker helps on messy real contracts.** On the public sets it adds at most 4 tokens (EXP-006).
-6. **How common a surname alone is in Romanian contracts**, and how often the models miss it (LDA-20). The sweep does not know it.
+5. **Whether the LLM checker helps on messy real contracts.** On the public sets it adds at most 4 tokens (EXP-006), and nothing on the synthetic set (EXP-013). The review says that the public sets left little to find (13 to 23 missed tokens after `medium`), so the verdict is "no gain shown", not "no use". A better test: ask the LLM yes or no only for the capitalized words that stay visible (LDA-43, LDA-28).
+6. **How common a surname alone is in Romanian contracts**, and how often the models miss it (LDA-42). The sweep knows a surname alone only when a model found it alone, or when a title or role word comes before it.
+7. **How much a strong model can guess about the parties from the hidden files** (LDA-23). The review found that court names, contract numbers, dates and amounts stay visible.
 
 ## Next experiments
 
-1. Romanian corpus from the lawyer (10 to 15 documents): the same runs as above. This decides the default level for Romanian.
+1. Romanian corpus from the lawyer (10 to 15 documents): the same runs as above. This decides the default level for Romanian. Start with 3 firm templates and a 15-minute talk (LDA-22).
+1b. The next version of the synthetic set (60 documents, frozen hard cases, dev and holdout, Word files with metadata) and a gate that runs it (LDA-46, LDA-26).
+1c. Party cues and short names of a party (LDA-42); `knowledgator/gliner-x` for Romanian (LDA-44).
 2. The LLM checker (EXP-006 is done: no useful gain). Only if there is a reason: a filter for the noise, a prompt with examples, and the Romanian documents of the lawyer (LDA-28).
 3. The same agent test with a plain prompt (no rules for ids) and with other tools (LDA-19 follow-up).
 4. Case and application numbers (`36110/97`): the recall on TAB is 0 of 17. It matters less for contracts, but it is a gap.

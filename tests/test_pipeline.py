@@ -3,18 +3,20 @@
 The first run downloads the models. Run only the fast tests with: pytest -m "not models"
 """
 
+import io
 import json
 import re
+import zipfile
 from pathlib import Path
 
 import pytest
+from samples import build_docx
 
 from legal_anonymizer.config import load_settings
 from legal_anonymizer.documents import open_document, scan_text
 from legal_anonymizer.engine import Engine
 from legal_anonymizer.textnorm import fold
 from legal_anonymizer.vault import PLACEHOLDER_RE, Vault
-from samples import build_docx
 
 pytestmark = pytest.mark.models
 
@@ -132,12 +134,29 @@ def test_docx_with_tracked_changes_header_footnote_comment_and_metadata(case):
     assert "Sediu:\tCluj-Napoca" in back
 
 
-def test_a_leak_in_a_part_that_we_do_not_process_is_reported(case):
+def test_a_link_target_is_hidden_and_restored(case):
     engine, _, _, _ = case
     source = build_docx(extra_links=(("rId9", "mailto:ion.popescu@alfaconstruct.ro"),))
     result = engine.anonymize("link.docx", source)
-    assert result.leaks, "the e-mail is in a link target; the check must find it"
-    assert any(p.startswith("[EMAIL_") for p in result.leaks)
+    assert result.leaks == []
+    with zipfile.ZipFile(io.BytesIO(result.data)) as z:
+        rels = z.read("word/_rels/document.xml.rels").decode()
+    assert "ion.popescu@alfaconstruct.ro" not in rels and "mailto:[EMAIL_" in rels
+    back = engine.restore("link.docx", result.data)
+    with zipfile.ZipFile(io.BytesIO(back.data)) as z:
+        assert "mailto:ion.popescu@alfaconstruct.ro" in z.read("word/_rels/document.xml.rels").decode()
+
+
+def test_a_leak_in_a_part_that_we_do_not_process_is_reported(case):
+    engine, _, _, _ = case
+    result = engine.anonymize("link.docx", build_docx())
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(io.BytesIO(result.data)) as zin, zipfile.ZipFile(buffer, "w") as zout:
+        for info in zin.infolist():
+            zout.writestr(info.filename, zin.read(info.filename))
+        zout.writestr("word/vbaData.xml", '<data note="ion.popescu@alfaconstruct.ro"/>')  # a part that we do not read
+    leaks = engine.find_leaks("link.docx", buffer.getvalue())
+    assert any(p.startswith("[EMAIL_") for p in leaks)
 
 
 # --- optional types: dates and job titles -------------------------------------------
